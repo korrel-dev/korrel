@@ -30,6 +30,7 @@ class Scenario(BaseModel):
     opening_message: str
     tools: list[MockTool] = Field(default_factory=list)
     max_turns: int = Field(default=1, ge=1)
+    max_tool_rounds: int = Field(default=8, ge=1)
     seed: int = 0
     info: Optional[dict[str, Any]] = None
     rubric: Optional[Rubric] = None

@@ -30,6 +30,7 @@ class Turn(BaseModel):
 
     index: int
     messages: list[Message]
+    stop_reason: Optional[str] = None
 
 
 class Transcript(BaseModel):
@@ -144,7 +145,12 @@ def run_scenario(
         messages.append(assistant)
         turn_messages.append(assistant)
 
+        tool_round = 0
+        turn_stop_reason: Optional[str] = None
         while assistant.tool_calls:
+            if tool_round >= scenario.max_tool_rounds:
+                turn_stop_reason = "max_tool_rounds"
+                break
             for call in assistant.tool_calls:
                 tool_message = _resolve_tool_call(call, tools_by_name, state)
                 messages.append(tool_message)
@@ -152,8 +158,9 @@ def run_scenario(
             assistant = adapter(messages, tool_schemas)
             messages.append(assistant)
             turn_messages.append(assistant)
+            tool_round += 1
 
-        turns.append(Turn(index=turn_index, messages=turn_messages))
+        turns.append(Turn(index=turn_index, messages=turn_messages, stop_reason=turn_stop_reason))
 
         if turn_index == scenario.max_turns - 1:
             break

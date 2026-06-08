@@ -100,6 +100,101 @@ def load_scenario_and_adapter(
     return scenario, adapter  # type: ignore[return-value]
 
 
+def load_scenario_only(
+    module: types.ModuleType,
+    scenario_attr: str,
+) -> Scenario:
+    """Extract a Scenario from a loaded module (no adapter required)."""
+    scenario = getattr(module, scenario_attr, None)
+    if scenario is None:
+        raise AttributeError(
+            f"Module {module.__name__!r} has no attribute {scenario_attr!r}. "
+            "Define a module-level `scenario = Scenario(...)` in the file."
+        )
+    if not isinstance(scenario, Scenario):
+        raise TypeError(
+            f"{scenario_attr!r} in {module.__name__!r} is not a Scenario "
+            f"(got {type(scenario).__name__})."
+        )
+    return scenario
+
+
+# ---------------------------------------------------------------------------
+# `korrel export` command
+# ---------------------------------------------------------------------------
+
+_SUPPORTED_TARGETS = ("verifiers",)
+
+
+def _cmd_export(args: argparse.Namespace) -> int:
+    target: str = args.to
+    if target not in _SUPPORTED_TARGETS:
+        print(
+            f"error: unsupported export target {target!r}. "
+            f"Supported: {', '.join(_SUPPORTED_TARGETS)}.",
+            file=sys.stderr,
+        )
+        return 1
+
+    file_path = Path(args.file).resolve()
+    if not file_path.exists():
+        print(f"error: file not found: {file_path}", file=sys.stderr)
+        return 1
+
+    try:
+        module = load_module_from_path(file_path)
+    except Exception as exc:
+        print(f"error: could not load {file_path}: {exc}", file=sys.stderr)
+        return 1
+
+    if not args.scenario_attr.isidentifier():
+        print(
+            f"error: --scenario-attr must be a valid Python identifier, "
+            f"got {args.scenario_attr!r}.",
+            file=sys.stderr,
+        )
+        return 1
+
+    try:
+        scenario = load_scenario_only(module, scenario_attr=args.scenario_attr)
+    except (AttributeError, TypeError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    # scenario.id is author-controlled; reduce it to a single safe path component
+    # before using it as the default output directory name (security review K9:
+    # an id carrying separators or an absolute path could otherwise escape
+    # .korrel/export/). When --out is given the operator owns that path.
+    out_dir = (
+        Path(args.out)
+        if args.out
+        else Path(".korrel") / "export" / _safe_filename_stem(scenario.id)
+    )
+
+    if target == "verifiers":
+        # Import the artifact emitter (does not import verifiers itself).
+        from .exporters.verifiers import write_verifiers_env
+
+        produced = write_verifiers_env(
+            scenario,
+            out_dir,
+            scenario_source_path=file_path,
+            scenario_attr=args.scenario_attr,
+        )
+        pyproject = produced / "pyproject.toml"
+        env_module = _safe_filename_stem(scenario.id).replace("-", "_").replace(" ", "_")
+        env_module_py = produced / f"{env_module}.py"
+        scenario_py = produced / "_scenario.py"
+        print(f"{'target':<12}: verifiers")
+        print(f"{'scenario':<12}: {scenario.id}")
+        print(f"{'out_dir':<12}: {produced}")
+        print(f"{'pyproject':<12}: {pyproject}")
+        print(f"{'env_module':<12}: {env_module_py}")
+        print(f"{'scenario_src':<12}: {scenario_py}")
+
+    return 0
+
+
 # ---------------------------------------------------------------------------
 # `korrel run` command
 # ---------------------------------------------------------------------------
@@ -201,6 +296,35 @@ def _build_parser() -> argparse.ArgumentParser:
         default="adapter",
         help="Module attribute name for the AgentAdapter (default: adapter).",
     )
+
+    export_parser = sub.add_parser(
+        "export",
+        help="Export a scenario as an RL training environment.",
+    )
+    export_parser.add_argument(
+        "file",
+        metavar="SCENARIO_PY",
+        help="Path to the scenario module.",
+    )
+    export_parser.add_argument(
+        "--to",
+        metavar="TARGET",
+        required=True,
+        help=f"Export target. Supported: {', '.join(_SUPPORTED_TARGETS)}.",
+    )
+    export_parser.add_argument(
+        "--out",
+        metavar="DIR",
+        default=None,
+        help="Output directory for the generated package (default: .korrel/export/<scenario-id>/).",
+    )
+    export_parser.add_argument(
+        "--scenario-attr",
+        metavar="NAME",
+        default="scenario",
+        help="Module attribute name for the Scenario (default: scenario).",
+    )
+
     return parser
 
 
@@ -214,6 +338,8 @@ def main(argv: Optional[list[str]] = None) -> None:
 
     if args.command == "run":
         sys.exit(_cmd_run(args))
+    elif args.command == "export":
+        sys.exit(_cmd_export(args))
     else:
         parser.print_help()
         sys.exit(1)

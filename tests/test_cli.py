@@ -183,6 +183,37 @@ def test_write_transcript_for_valid_json(tmp_path):
     assert "turns" in data
 
 
+@pytest.mark.parametrize(
+    "malicious_id",
+    [
+        "../../etc/crontab",
+        "../escape",
+        "a/b/c",
+        "nested\\windows\\path",
+    ],
+)
+def test_write_transcript_for_id_cannot_escape_out_dir(tmp_path, malicious_id):
+    # Security review K9: an author-controlled scenario id must not let the
+    # transcript file escape out_dir via path separators.
+    result = _fake_run_result()
+    out = tmp_path / "out"
+    path = write_transcript_for(result, malicious_id, out)
+    assert path.parent == out
+    assert path.exists()
+
+
+@pytest.mark.parametrize("degenerate_id", ["", ".", "..", "/", "\\"])
+def test_write_transcript_for_degenerate_id_falls_back(tmp_path, degenerate_id):
+    # An id that reduces to no usable filename component falls back to a default
+    # inside out_dir rather than writing out_dir itself.
+    result = _fake_run_result()
+    out = tmp_path / "out"
+    path = write_transcript_for(result, degenerate_id, out)
+    assert path.parent == out
+    assert path.name == "scenario.transcript.json"
+    assert path.exists()
+
+
 # ---------------------------------------------------------------------------
 # CLI main() integration
 # ---------------------------------------------------------------------------
@@ -281,3 +312,222 @@ def test_adapter_from_provider_exported_from_init():
     import korrel
     assert hasattr(korrel, "adapter_from_provider")
     assert callable(korrel.adapter_from_provider)
+
+
+# ---------------------------------------------------------------------------
+# Additional gap coverage
+# ---------------------------------------------------------------------------
+
+
+NON_CALLABLE_ADAPTER_MODULE = """\
+from korrel import Scenario
+from korrel.persona import Persona
+
+scenario = Scenario(
+    id="bad_adapter",
+    system="test",
+    persona=Persona(goal="g", behavior="b"),
+    opening_message="hello",
+)
+adapter = 42
+"""
+
+
+def test_load_scenario_and_adapter_non_callable_adapter(tmp_path):
+    f = tmp_path / "bad_adapter_scenario.py"
+    f.write_text(NON_CALLABLE_ADAPTER_MODULE, encoding="utf-8")
+    mod = load_module_from_path(f)
+    with pytest.raises(TypeError, match="adapter"):
+        load_scenario_and_adapter(mod, "scenario", "adapter")
+
+
+def test_cli_run_scenario_attr_override(tmp_path, capsys):
+    # Write a module where the scenario lives under a non-default attribute name.
+    src = """\
+from korrel import Scenario, Rubric
+from korrel.persona import Persona
+from korrel.types import Message
+
+def always_one(completion, info, **kwargs):
+    return 1.0
+
+my_scenario = Scenario(
+    id="attr_override_test",
+    system="test",
+    persona=Persona(goal="g", behavior="b"),
+    opening_message="hello",
+    rubric=Rubric(funcs=[always_one], pass_threshold=0.5),
+)
+
+class _FakeAdapter:
+    def __call__(self, messages, tools):
+        return Message(role="assistant", content="done")
+
+adapter = _FakeAdapter()
+"""
+    f = tmp_path / "attr_scenario.py"
+    f.write_text(src, encoding="utf-8")
+    out_dir = tmp_path / "out"
+
+    from korrel.cli import main
+    with pytest.raises(SystemExit) as exc_info:
+        main(["run", str(f), "--out", str(out_dir), "--scenario-attr", "my_scenario"])
+    assert exc_info.value.code == 0
+    captured = capsys.readouterr()
+    assert "attr_override_test" in captured.out
+
+
+def test_cli_run_adapter_attr_override(tmp_path, capsys):
+    src = """\
+from korrel import Scenario, Rubric
+from korrel.persona import Persona
+from korrel.types import Message
+
+def always_one(completion, info, **kwargs):
+    return 1.0
+
+scenario = Scenario(
+    id="adapter_attr_override",
+    system="test",
+    persona=Persona(goal="g", behavior="b"),
+    opening_message="hello",
+    rubric=Rubric(funcs=[always_one], pass_threshold=0.5),
+)
+
+class _FakeAdapter:
+    def __call__(self, messages, tools):
+        return Message(role="assistant", content="done")
+
+my_adapter = _FakeAdapter()
+"""
+    f = tmp_path / "adapter_attr_scenario.py"
+    f.write_text(src, encoding="utf-8")
+    out_dir = tmp_path / "out"
+
+    from korrel.cli import main
+    with pytest.raises(SystemExit) as exc_info:
+        main(["run", str(f), "--out", str(out_dir), "--adapter-attr", "my_adapter"])
+    assert exc_info.value.code == 0
+
+
+def test_cli_run_wrong_scenario_type_exits_nonzero(tmp_path, capsys):
+    f = tmp_path / "wrong_type_scenario.py"
+    f.write_text(WRONG_TYPE_MODULE, encoding="utf-8")
+
+    from korrel.cli import main
+    with pytest.raises(SystemExit) as exc_info:
+        main(["run", str(f), "--out", str(tmp_path / "out")])
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert "error" in captured.err.lower()
+
+
+def test_cli_run_non_callable_adapter_exits_nonzero(tmp_path, capsys):
+    f = tmp_path / "noncallable_scenario.py"
+    f.write_text(NON_CALLABLE_ADAPTER_MODULE, encoding="utf-8")
+
+    from korrel.cli import main
+    with pytest.raises(SystemExit) as exc_info:
+        main(["run", str(f), "--out", str(tmp_path / "out")])
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert "error" in captured.err.lower()
+
+
+def test_cli_run_fail_output_shows_failed_functions(tmp_path, capsys):
+    f = tmp_path / "fail_scenario.py"
+    f.write_text(FAILING_MODULE, encoding="utf-8")
+    out_dir = tmp_path / "out"
+
+    from korrel.cli import main
+    with pytest.raises(SystemExit):
+        main(["run", str(f), "--out", str(out_dir)])
+    captured = capsys.readouterr()
+    # The failing function name must appear in the output.
+    assert "always_zero" in captured.out
+
+
+def test_cli_run_transcript_file_is_valid_json(tmp_path):
+    f = tmp_path / "pass_scenario.py"
+    f.write_text(PASSING_MODULE, encoding="utf-8")
+    out_dir = tmp_path / "transcripts"
+
+    from korrel.cli import main
+    with pytest.raises(SystemExit):
+        main(["run", str(f), "--out", str(out_dir)])
+
+    transcript_file = out_dir / "cli_pass_test.transcript.json"
+    assert transcript_file.exists()
+    data = json.loads(transcript_file.read_text(encoding="utf-8"))
+    assert "messages" in data
+    assert "turns" in data
+    assert isinstance(data["messages"], list)
+
+
+def test_cli_run_score_printed(tmp_path, capsys):
+    f = tmp_path / "pass_scenario.py"
+    f.write_text(PASSING_MODULE, encoding="utf-8")
+    out_dir = tmp_path / "out"
+
+    from korrel.cli import main
+    with pytest.raises(SystemExit):
+        main(["run", str(f), "--out", str(out_dir)])
+    captured = capsys.readouterr()
+    assert "score" in captured.out
+
+
+def test_cli_no_subcommand_exits_zero(capsys):
+    from korrel.cli import main
+    with pytest.raises(SystemExit) as exc_info:
+        main([])
+    assert exc_info.value.code == 0
+
+
+def test_cli_run_transcript_path_printed(tmp_path, capsys):
+    f = tmp_path / "pass_scenario.py"
+    f.write_text(PASSING_MODULE, encoding="utf-8")
+    out_dir = tmp_path / "out"
+
+    from korrel.cli import main
+    with pytest.raises(SystemExit):
+        main(["run", str(f), "--out", str(out_dir)])
+    captured = capsys.readouterr()
+    assert "transcript" in captured.out
+
+
+@pytest.mark.parametrize("scenario_attr,adapter_attr,expected_exit", [
+    ("missing_scenario", "adapter", 1),
+    ("scenario", "missing_adapter", 1),
+])
+def test_cli_run_missing_attribute_exits_nonzero(tmp_path, capsys, scenario_attr, adapter_attr, expected_exit):
+    src = """\
+from korrel import Scenario, Rubric
+from korrel.persona import Persona
+from korrel.types import Message
+
+def always_one(completion, info, **kwargs):
+    return 1.0
+
+scenario = Scenario(
+    id="attr_test",
+    system="test",
+    persona=Persona(goal="g", behavior="b"),
+    opening_message="hello",
+    rubric=Rubric(funcs=[always_one], pass_threshold=0.5),
+)
+
+class _FakeAdapter:
+    def __call__(self, messages, tools):
+        return Message(role="assistant", content="done")
+
+adapter = _FakeAdapter()
+"""
+    f = tmp_path / "attr_test_scenario.py"
+    f.write_text(src, encoding="utf-8")
+
+    from korrel.cli import main
+    with pytest.raises(SystemExit) as exc_info:
+        main(["run", str(f), "--out", str(tmp_path / "out"),
+              "--scenario-attr", scenario_attr,
+              "--adapter-attr", adapter_attr])
+    assert exc_info.value.code == expected_exit

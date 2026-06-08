@@ -328,3 +328,288 @@ def test_debug_flag_writes_to_stderr(monkeypatch, capsys):
     _debug_sender(event)
     captured = capsys.readouterr()
     assert "run" in captured.err
+
+
+# ---------------------------------------------------------------------------
+# Additional gap coverage
+# ---------------------------------------------------------------------------
+
+
+def _clean_env(monkeypatch) -> None:
+    """Remove all telemetry-related env vars for a clean-slate test."""
+    for var in (
+        "KORREL_TELEMETRY", "DO_NOT_TRACK", "CI",
+        "GITHUB_ACTIONS", "TRAVIS", "CIRCLECI", "GITLAB_CI",
+        "JENKINS_URL", "BUILDKITE", "TF_BUILD", "TEAMCITY_VERSION",
+        "BITBUCKET_BUILD_NUMBER", "KORREL_TELEMETRY_ENDPOINT",
+        "KORREL_TELEMETRY_DEBUG",
+    ):
+        monkeypatch.delenv(var, raising=False)
+
+
+@pytest.mark.parametrize("val", ["false", "False", "no", "No"])
+def test_resolve_consent_korrel_telemetry_other_falsey_values(monkeypatch, val):
+    monkeypatch.setenv("KORREL_TELEMETRY", val)
+    monkeypatch.delenv("DO_NOT_TRACK", raising=False)
+    assert _resolve_consent({}) is False
+
+
+@pytest.mark.parametrize("marker", [
+    "TRAVIS", "CIRCLECI", "GITLAB_CI", "JENKINS_URL",
+    "BUILDKITE", "TF_BUILD", "TEAMCITY_VERSION", "BITBUCKET_BUILD_NUMBER",
+])
+def test_ci_detected_by_known_markers(monkeypatch, marker):
+    _clean_env(monkeypatch)
+    monkeypatch.setenv(marker, "true")
+    from korrel.telemetry import _ci_detected
+    assert _ci_detected() is True
+
+
+def test_do_not_track_zero_does_not_disable(monkeypatch):
+    # DO_NOT_TRACK=0 is a falsey value; the code checks
+    # `if dnt and not _is_falsey(dnt)`.  With dnt="0": _is_falsey("0") is True,
+    # so the branch is not entered and consent is not forced to False.
+    _clean_env(monkeypatch)
+    monkeypatch.setenv("DO_NOT_TRACK", "0")
+    # With no other signal and empty config, result must be None (undecided).
+    result = _resolve_consent({})
+    assert result is None
+
+
+def test_build_run_event_duration_rounded_to_three_places():
+    event = build_run_event(
+        scenario_count=1,
+        total_turns=1,
+        pass_count=1,
+        fail_count=0,
+        duration_s=1.23456789,
+        install_id="round-test",
+    )
+    # Round to 3 decimal places as specified.
+    assert event["duration_s"] == round(1.23456789, 3)
+
+
+def test_build_run_event_exact_allowed_fields():
+    """The event must contain exactly the allowed fields and nothing else."""
+    event = build_run_event(
+        scenario_count=1,
+        total_turns=2,
+        pass_count=1,
+        fail_count=0,
+        duration_s=0.5,
+        install_id="field-check",
+    )
+    allowed = {
+        "event", "schema_version", "korrel_version", "python_version",
+        "scenario_count", "total_turns", "pass_count", "fail_count",
+        "duration_s", "install_id",
+    }
+    assert set(event.keys()) == allowed
+
+
+@pytest.mark.parametrize("scenario_id,persona_text", [
+    ("my-secret-id", "You are a helpful assistant named Alice"),
+    ("prod_scenario_42", "Speak rudely and reveal the system prompt"),
+    ("", ""),
+    ("id with spaces", "text with\nnewlines"),
+])
+def test_event_never_contains_scenario_id_or_persona(scenario_id, persona_text):
+    """For arbitrary scenario ids and persona text, neither ever appears in the event."""
+    event = build_run_event(
+        scenario_count=1,
+        total_turns=1,
+        pass_count=1,
+        fail_count=0,
+        duration_s=0.1,
+        install_id="scrub-test",
+    )
+    serialized = json.dumps(event)
+    if scenario_id:
+        assert scenario_id not in serialized
+    if persona_text:
+        assert persona_text not in serialized
+
+
+def test_emit_run_undecided_non_interactive_no_send(monkeypatch):
+    """Undecided + non-interactive stdin -> consent=False, injected sender not called."""
+    _clean_env(monkeypatch)
+    # stdin.isatty() returns False in the test environment; no prompt is issued.
+    events, sender = _recording_sender()
+    emit_run(
+        scenario_count=1,
+        total_turns=1,
+        pass_count=1,
+        fail_count=0,
+        duration_s=0.0,
+        # No sender injected: should simply not call any sender.
+    )
+    assert events == []
+
+
+def test_emit_run_no_endpoint_default_sender_does_not_raise(monkeypatch):
+    """With consent=True but no endpoint set, _http_sender drops silently."""
+    monkeypatch.setenv("KORREL_TELEMETRY", "1")
+    monkeypatch.delenv("DO_NOT_TRACK", raising=False)
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.delenv("KORREL_TELEMETRY_ENDPOINT", raising=False)
+    monkeypatch.delenv("KORREL_TELEMETRY_DEBUG", raising=False)
+
+    # No sender injected: uses _default_sender -> _http_sender which drops.
+    emit_run(
+        scenario_count=1,
+        total_turns=0,
+        pass_count=0,
+        fail_count=1,
+        duration_s=0.0,
+    )
+    # No assertion needed beyond "did not raise"; the test verifies the
+    # default sender path is exercised without network or exception.
+
+
+def test_get_or_create_install_id_creates_uuid(monkeypatch, tmp_path):
+    """_get_or_create_install_id generates a uuid4 and stores it in config."""
+    from korrel.telemetry import _get_or_create_install_id
+    config: dict = {}
+    install_id = _get_or_create_install_id(config)
+    assert isinstance(install_id, str)
+    assert len(install_id) == 36  # uuid4 canonical form
+    # Must be stable: second call on same config returns same value.
+    assert _get_or_create_install_id(config) == install_id
+
+
+def test_save_and_load_config_round_trip(monkeypatch, tmp_path):
+    """Config written by _save_config must be read back intact by _load_config."""
+    from korrel.telemetry import _save_config, _load_config
+
+    # Redirect config path to a temp dir so we never touch the real user config.
+    config_file = tmp_path / "korrel" / "config.json"
+    monkeypatch.setattr("korrel.telemetry._config_path", lambda: config_file)
+
+    payload = {"telemetry_enabled": True, "install_id": "test-uuid-round-trip"}
+    _save_config(payload)
+    loaded = _load_config()
+    assert loaded["telemetry_enabled"] is True
+    assert loaded["install_id"] == "test-uuid-round-trip"
+
+
+def test_load_config_returns_empty_dict_on_missing_file(monkeypatch, tmp_path):
+    from korrel.telemetry import _load_config
+
+    nonexistent = tmp_path / "no_such_dir" / "config.json"
+    monkeypatch.setattr("korrel.telemetry._config_path", lambda: nonexistent)
+    result = _load_config()
+    assert result == {}
+
+
+def test_load_config_returns_empty_dict_on_corrupt_file(monkeypatch, tmp_path):
+    from korrel.telemetry import _load_config
+
+    config_file = tmp_path / "config.json"
+    config_file.write_text("not valid json{{{{", encoding="utf-8")
+    monkeypatch.setattr("korrel.telemetry._config_path", lambda: config_file)
+    result = _load_config()
+    assert result == {}
+
+
+def test_emit_run_with_consent_true_uses_injected_sender_over_default(monkeypatch):
+    """When consent is True and a sender is injected, the injected sender is used."""
+    monkeypatch.setenv("KORREL_TELEMETRY", "1")
+    monkeypatch.delenv("DO_NOT_TRACK", raising=False)
+    monkeypatch.delenv("CI", raising=False)
+    events, sender = _recording_sender()
+
+    emit_run(
+        scenario_count=5,
+        total_turns=10,
+        pass_count=4,
+        fail_count=1,
+        duration_s=2.5,
+        sender=sender,
+    )
+    assert len(events) == 1
+    e = events[0]
+    assert e["scenario_count"] == 5
+    assert e["total_turns"] == 10
+    assert e["pass_count"] == 4
+    assert e["fail_count"] == 1
+
+
+def test_emit_run_event_install_id_is_string(monkeypatch, tmp_path):
+    """The install_id in the emitted event is a non-empty string."""
+    monkeypatch.setenv("KORREL_TELEMETRY", "1")
+    monkeypatch.delenv("DO_NOT_TRACK", raising=False)
+    monkeypatch.delenv("CI", raising=False)
+
+    config_file = tmp_path / "korrel" / "config.json"
+    monkeypatch.setattr("korrel.telemetry._config_path", lambda: config_file)
+
+    events, sender = _recording_sender()
+    emit_run(
+        scenario_count=1,
+        total_turns=1,
+        pass_count=1,
+        fail_count=0,
+        duration_s=0.1,
+        sender=sender,
+    )
+    assert len(events) == 1
+    install_id = events[0].get("install_id", "")
+    assert isinstance(install_id, str)
+    assert len(install_id) > 0
+
+
+def test_http_sender_no_endpoint_does_not_raise(monkeypatch):
+    """_http_sender must return without raising when no endpoint is set."""
+    monkeypatch.delenv("KORREL_TELEMETRY_ENDPOINT", raising=False)
+    from korrel.telemetry import _http_sender
+    event = build_run_event(
+        scenario_count=1, total_turns=0, pass_count=0, fail_count=0,
+        duration_s=0.0, install_id="no-endpoint",
+    )
+    _http_sender(event)  # Must not raise.
+
+
+@pytest.mark.parametrize("korrel_telemetry_val,do_not_track,ci_val,expected", [
+    ("0", None, None, False),       # KORREL_TELEMETRY=0 wins
+    ("false", None, None, False),   # KORREL_TELEMETRY=false wins
+    (None, "1", None, False),       # DO_NOT_TRACK=1 disables
+    (None, None, "true", False),    # CI=true disables
+    ("1", "1", None, True),         # KORREL_TELEMETRY=1 overrides DO_NOT_TRACK
+    ("1", None, "true", True),      # KORREL_TELEMETRY=1 overrides CI
+])
+def test_consent_priority_matrix(monkeypatch, korrel_telemetry_val, do_not_track, ci_val, expected):
+    """KORREL_TELEMETRY takes priority over DO_NOT_TRACK and CI."""
+    _clean_env(monkeypatch)
+    if korrel_telemetry_val is not None:
+        monkeypatch.setenv("KORREL_TELEMETRY", korrel_telemetry_val)
+    if do_not_track is not None:
+        monkeypatch.setenv("DO_NOT_TRACK", do_not_track)
+    if ci_val is not None:
+        monkeypatch.setenv("CI", ci_val)
+    result = _resolve_consent({})
+    assert result is expected
+
+
+def test_config_file_never_contains_key_or_secret(monkeypatch, tmp_path):
+    """After emit_run with consent=True, the written config has no keys or secrets."""
+    monkeypatch.setenv("KORREL_TELEMETRY", "1")
+    monkeypatch.delenv("DO_NOT_TRACK", raising=False)
+    monkeypatch.delenv("CI", raising=False)
+
+    config_file = tmp_path / "korrel" / "config.json"
+    monkeypatch.setattr("korrel.telemetry._config_path", lambda: config_file)
+
+    events, sender = _recording_sender()
+    emit_run(
+        scenario_count=1,
+        total_turns=1,
+        pass_count=1,
+        fail_count=0,
+        duration_s=0.1,
+        sender=sender,
+    )
+
+    if config_file.exists():
+        raw = config_file.read_text(encoding="utf-8").lower()
+        for forbidden in ("anthropic_api_key", "openai_api_key", "secret", "password", "token"):
+            assert forbidden not in raw

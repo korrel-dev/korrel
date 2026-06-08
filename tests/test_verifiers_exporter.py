@@ -1110,14 +1110,14 @@ def test_cli_export_unsupported_target(tmp_path, capsys):
 
     args = argparse.Namespace(
         file=str(dummy),
-        to="openenv",  # not yet supported
+        to="not-a-real-target",
         out=str(tmp_path / "out"),
         scenario_attr="scenario",
     )
     result = _cmd_export(args)
     assert result == 1
     captured = capsys.readouterr()
-    assert "unsupported" in captured.err.lower() or "openenv" in captured.err
+    assert "unsupported" in captured.err.lower()
 
 
 # ---------------------------------------------------------------------------

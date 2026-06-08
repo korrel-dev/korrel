@@ -190,11 +190,16 @@ def test_write_transcript_for_valid_json(tmp_path):
         "../escape",
         "a/b/c",
         "nested\\windows\\path",
+        "/",
+        "\\",
     ],
 )
 def test_write_transcript_for_id_cannot_escape_out_dir(tmp_path, malicious_id):
     # Security review K9: an author-controlled scenario id must not let the
-    # transcript file escape out_dir via path separators.
+    # transcript file escape out_dir, on either POSIX or Windows. The output
+    # filename is platform-dependent (backslash is a separator on Windows but a
+    # valid filename character on POSIX), so the stable invariant is that the
+    # parent stays out_dir and a file is produced.
     result = _fake_run_result()
     out = tmp_path / "out"
     path = write_transcript_for(result, malicious_id, out)
@@ -202,10 +207,11 @@ def test_write_transcript_for_id_cannot_escape_out_dir(tmp_path, malicious_id):
     assert path.exists()
 
 
-@pytest.mark.parametrize("degenerate_id", ["", ".", "..", "/", "\\"])
+@pytest.mark.parametrize("degenerate_id", ["", ".", ".."])
 def test_write_transcript_for_degenerate_id_falls_back(tmp_path, degenerate_id):
-    # An id that reduces to no usable filename component falls back to a default
-    # inside out_dir rather than writing out_dir itself.
+    # An id that reduces to no usable filename component on every platform
+    # (Path(...).name == "") falls back to a default inside out_dir rather than
+    # writing out_dir itself.
     result = _fake_run_result()
     out = tmp_path / "out"
     path = write_transcript_for(result, degenerate_id, out)

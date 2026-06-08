@@ -17,6 +17,7 @@ dependencies = [
 
 [project.optional-dependencies]
 openai = ["openai"]
+verifiers = ["verifiers>=0.1.14"]
 
 [project.scripts]
 korrel = "korrel.cli:main"

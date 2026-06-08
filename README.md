@@ -142,6 +142,85 @@ print(result.score, result.passed, result.failed_functions)
 
 `examples/support_refund.py` holds a runnable scenario definition with a real `AnthropicProvider` adapter.
 
+## Export to verifiers
+
+A Korrel scenario can be translated into a [`verifiers`](https://github.com/willccbb/verifiers) RL training environment. The full mapping is specified in [`docs/spec/korrel-to-verifiers.md`](docs/spec/korrel-to-verifiers.md).
+
+### Install
+
+`verifiers` is an optional extra. `import korrel` works without it.
+
+```
+pip install 'korrel[verifiers]'
+# or
+uv add 'korrel[verifiers]'
+```
+
+`verifiers==0.1.14` requires Python `<3.14`, so the extra installs only on Python 3.10-3.13.
+
+### Python API
+
+```python
+from korrel.exporters.verifiers import to_verifiers_env
+
+env = to_verifiers_env(scenario)
+```
+
+`to_verifiers_env` returns a constructed verifiers environment: a `MultiTurnEnv` subclass for most scenarios (persona-driven or tool-bearing), or a `SingleTurnEnv` for a single-exchange scenario with no tools and no persona follow-up. Using the support-refund scenario from the quickstart, the call returns a `MultiTurnEnv` because the scenario has both a persona and a mock tool.
+
+### CLI export
+
+```
+korrel export support_refund.py --to verifiers --out ./support_refund_env
+```
+
+This writes a pip-installable package that `verifiers` discovers via `load_environment`:
+
+```
+support_refund_env/
+  pyproject.toml
+  support_refund.py   # environment module exposing load_environment()
+  _scenario.py        # copy of the original scenario source
+```
+
+Install the package in a Python 3.10-3.13 environment and load it:
+
+```python
+import verifiers as vf
+
+env = vf.load_environment("support_refund")
+```
+
+When `--out` is omitted, the package is written to `.korrel/export/<scenario-id>/`.
+
+### Concept mapping
+
+| Korrel concept | verifiers target |
+|---|---|
+| `Scenario` (persona or tools or `max_turns > 1`) | `MultiTurnEnv` subclass |
+| `Scenario` (single exchange, no tools) | `SingleTurnEnv` |
+| `Persona` | user-turn generation inside `env_response` |
+| `MockTool` | tool-execution branch of `env_response` |
+| Rubric reward functions | `verifiers.Rubric(funcs=..., weights=...)` |
+| `Scenario.system` + `opening_message` + `info` | dataset row (`prompt`, `info`) |
+
+The spec holds the full field-level detail.
+
+### What survives the translation
+
+The reward-function signature `(completion, info, **kwargs) -> float` is unchanged. The canonical transcript types in `korrel.types` are unchanged. The only adaptation at the boundary is converting the `completion` value from the verifiers message shape to the korrel canonical shape before calling each reward function.
+
+Lossy edges (summarized; see the spec's [Lossy edges](docs/spec/korrel-to-verifiers.md#lossy-edges) section for the complete list):
+
+- The persona generates user turns with a live model call inside `env_response`. BYO key, non-deterministic. Offline tests substitute a fake persona.
+- The judge reward function likewise makes a live model call during scoring.
+- Korrel aggregates reward functions by mean; verifiers uses a weighted sum. The exporter sets weights to `1/n` to reproduce the mean.
+- Korrel `max_turns` counts user-to-assistant exchanges; verifiers `max_turns` counts individual model-response steps. The exporter derives the verifiers step budget from `scenario.max_turns` and `scenario.max_tool_rounds`.
+
+### OpenEnv
+
+Export to OpenEnv is not in this release. `verifiers` consumes OpenEnv rather than exporting to it, so a Korrel-to-OpenEnv path is future work.
+
 ## Determinism
 
 Every run takes a seed and records the model and request parameters. The seed pins scenario setup and any sampling Korrel controls. LLM calls are not bit-reproducible; provider nondeterminism is outside the seed.

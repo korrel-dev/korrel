@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import sys
+import time
 import types
 from pathlib import Path
 from typing import Optional
@@ -112,7 +113,9 @@ def _cmd_run(args: argparse.Namespace) -> int:
         return 1
 
     seed: Optional[int] = args.seed
+    t_start = time.monotonic()
     result = run_scenario(scenario, adapter, seed=seed)
+    duration_s = time.monotonic() - t_start
 
     out_dir = Path(args.out) if args.out else Path(".korrel")
     transcript_path = write_transcript_for(result, scenario.id, out_dir)
@@ -128,6 +131,18 @@ def _cmd_run(args: argparse.Namespace) -> int:
         cluster_strs = [f"{c.function}({c.signature})" for c in result.clusters]
         print(f"clusters : {', '.join(cluster_strs)}")
     print(f"transcript: {transcript_path}")
+
+    # Emit telemetry. Best-effort: errors are swallowed inside emit_run.
+    from .telemetry import emit_run
+
+    total_turns = len(result.transcript.turns)
+    emit_run(
+        scenario_count=1,
+        total_turns=total_turns,
+        pass_count=1 if result.passed else 0,
+        fail_count=0 if result.passed else 1,
+        duration_s=duration_s,
+    )
 
     return 0 if result.passed else 1
 

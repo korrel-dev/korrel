@@ -37,6 +37,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
 from ..scenario import Scenario
+from ._shared import _sanitize_id_for_comment
 
 if TYPE_CHECKING:
     # Type-only: these are never imported at module load when verifiers is absent.
@@ -420,19 +421,6 @@ def to_verifiers_env(
 # ---------------------------------------------------------------------------
 # Artifact emitter
 # ---------------------------------------------------------------------------
-
-
-def _sanitize_id_for_comment(scenario_id: str) -> str:
-    """Return a display-safe single-line label for use in a comment or header.
-
-    Strips leading/trailing whitespace, collapses newlines to a space, and
-    removes every occurrence of triple-double-quote so the label cannot close
-    or escape from any surrounding string region in the generated module.
-    The exact scenario id is always preserved separately via repr().
-    """
-    label = scenario_id.strip().replace("\n", " ").replace("\r", " ")
-    label = label.replace('"""', "")
-    return label
 
 
 _PYPROJECT_TEMPLATE = """\

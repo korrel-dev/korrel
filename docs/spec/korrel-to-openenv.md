@@ -158,10 +158,13 @@ inner loop of `run_scenario` and the helper `_resolve_tool_call` (`src/korrel/ru
 
 Termination and terminal reward:
 
-- When the persona returns empty (the `if not next_user: break` in `run_scenario`) OR the user-turn
-  count reaches `scenario.max_turns` (the `for turn_index in range(scenario.max_turns)` bound), the
-  episode ends. `step` returns an `Observation` with `done=True` and `reward` set to the Korrel
-  rubric aggregate, `scenario.rubric.score(messages, scenario.info).score`
+- When the persona returns empty (the `if not next_user: break` in `run_scenario`) OR the policy
+  has received exactly `scenario.max_turns` assistant turns, the episode ends. The turn budget
+  matches `runtime.py::run_scenario` exactly: the policy gets `scenario.max_turns` assistant turns
+  and the persona is called at most `scenario.max_turns - 1` times (run_scenario breaks at
+  `turn_index == scenario.max_turns - 1` without calling the persona on the final turn). `step`
+  returns an `Observation` with `done=True` and `reward` set to the Korrel rubric aggregate,
+  `scenario.rubric.score(messages, scenario.info).score`
   (`src/korrel/rubric.py`, `Rubric.score` returning `RubricResult.score`).
 - Persona exhaustion sets `done=True`. The terminal reward is the single rubric aggregate returned
   once, on the `done=True` step. Every intermediate step carries `reward=None`.

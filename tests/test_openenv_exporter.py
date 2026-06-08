@@ -319,6 +319,72 @@ def test_write_openenv_env_returns_out_dir(tmp_path):
     assert result == out_dir
 
 
+def test_write_openenv_env_hostile_id_k11_injection_guard(tmp_path):
+    """K11 regression: a scenario.id with injection characters produces valid output.
+
+    A scenario.id containing a newline, semicolon, dot, space, and backslash
+    must produce:
+    - An env_module that is a valid Python identifier (.isidentifier() True).
+    - No path component containing a newline or OS path separator.
+    - Every generated .py file that compile()s without SyntaxError.
+    - The app.py import line is a single clean 'from .<identifier>_environment import' line.
+
+    Ref: security review K9/K11.
+    """
+    from korrel.exporters.openenv import write_openenv_env
+
+    # Construct a maximally hostile id (backslash last to avoid Windows path issues
+    # when combined with the other characters; use a raw backslash not as a separator).
+    hostile_id = "evil\n;.hello world\\"
+    scenario = _make_scenario(hostile_id)
+    out = write_openenv_env(scenario, tmp_path / "export")
+
+    # Determine what env_module was derived.
+    env_files = list((out / "server").glob("*_environment.py"))
+    assert len(env_files) == 1, f"Expected exactly one environment .py file, got {env_files}"
+    env_file = env_files[0]
+    # The stem is "<env_module>_environment"; env_module is everything before "_environment".
+    env_module_from_filename = env_file.stem.replace("_environment", "")
+
+    # env_module must be a valid Python identifier.
+    assert env_module_from_filename.isidentifier(), (
+        f"env_module derived from filename is not a valid identifier: {env_module_from_filename!r}"
+    )
+
+    # No file name component must contain a newline.
+    # (We check filenames specifically; full absolute paths naturally include separators.)
+    for py_file in out.rglob("*.py"):
+        assert "\n" not in py_file.name, (
+            f"Newline in generated filename: {py_file.name!r}"
+        )
+        assert "\r" not in py_file.name, (
+            f"Carriage return in generated filename: {py_file.name!r}"
+        )
+
+    # Every generated .py file must compile().
+    for py_file in out.rglob("*.py"):
+        source = py_file.read_text(encoding="utf-8")
+        try:
+            compile(source, str(py_file), "exec")
+        except SyntaxError as exc:
+            raise AssertionError(
+                f"Hostile id produced syntax error in {py_file.name}: {exc}"
+            ) from exc
+
+    # app.py must contain a single-line clean import (no injected newline+code).
+    app_source = (out / "server" / "app.py").read_text(encoding="utf-8")
+    import_lines = [
+        line for line in app_source.splitlines()
+        if f"from .{env_module_from_filename}_environment import" in line
+    ]
+    assert len(import_lines) >= 1, (
+        "app.py must contain the environment import line"
+    )
+    # Each matching line must be a single clean line with no injected code.
+    for line in import_lines:
+        assert "\n" not in line, f"Injected newline in import line: {line!r}"
+
+
 # ---------------------------------------------------------------------------
 # seed_observation
 # ---------------------------------------------------------------------------
@@ -560,13 +626,19 @@ def test_advance_persona_exhausted_terminates():
 
 
 def test_advance_max_turns_terminates():
-    """Reaching max_turns triggers done=True."""
+    """Reaching the max_turns budget triggers done=True.
+
+    The budget matches run_scenario: for max_turns=2 the policy gets 2
+    assistant turns and the persona is called at most 1 time. The cap fires
+    when user_turns >= max_turns - 1 (i.e. user_turns >= 1 for max_turns=2).
+    """
     from korrel.exporters.openenv import advance
 
     scenario = _make_scenario("turns-test", max_turns=2)
     state_messages: list = []
-    # Simulate that one user turn has already been completed.
-    tool_round_state = {"tool_round": 0, "user_turns": 2, "tool_state": {}}
+    # user_turns=1 is the minimum that triggers the cap for max_turns=2
+    # (cap fires at user_turns >= max_turns - 1 = 1).
+    tool_round_state = {"tool_round": 0, "user_turns": 1, "tool_state": {}}
 
     action = _make_tool_action(content="final turn")
 

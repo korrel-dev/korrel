@@ -323,6 +323,164 @@ def test_build_environment_class_instantiates(fake_openenv):
     assert env is not None
 
 
+def test_build_environment_class_raises_value_error_when_rubric_none(fake_openenv):
+    """build_environment_class raises ValueError when scenario.rubric is None.
+
+    A reward-less RL environment is meaningless. This mirrors to_verifiers_env
+    (N4: public constructor parity).
+    """
+    from korrel.exporters.openenv import build_environment_class
+    from korrel.scenario import Scenario
+
+    scenario = Scenario.model_construct(
+        id="no-rubric",
+        system="",
+        persona=_FakePersona([]),
+        opening_message="Hello.",
+        tools=[],
+        max_turns=1,
+        max_tool_rounds=8,
+        seed=0,
+        info=None,
+        rubric=None,
+    )
+    with pytest.raises(ValueError, match="Scenario.rubric is required"):
+        build_environment_class(scenario, object, object)
+
+
+# ---------------------------------------------------------------------------
+# Tests: max_turns budget matches run_scenario (B1 fix verification)
+# ---------------------------------------------------------------------------
+
+
+def test_max_turns_budget_1_gives_1_assistant_turn_0_persona_calls(fake_openenv):
+    """max_turns=1: policy gets 1 assistant turn, persona is never called.
+
+    Matches runtime.py::run_scenario: for max_turns=1 the loop runs once and
+    the persona is not called on that final turn (run_scenario breaks at
+    turn_index == max_turns - 1 without calling the persona).
+    """
+    from korrel.exporters.openenv import build_environment_class
+
+    FakeObservation = fake_openenv["openenv.core.env_server.types"].Observation
+
+    class _Obs(FakeObservation):
+        def __init__(self, messages=None, done=False, reward=None, **kw):
+            super().__init__(messages=messages, done=done, reward=reward, **kw)
+
+    persona_calls: list[int] = []
+
+    class _CountingPersona:
+        def next_message(self, messages: Any) -> Any:
+            persona_calls.append(1)
+            return "follow-up"
+
+    scenario = _make_scenario("budget-1-test", max_turns=1, persona=_CountingPersona())
+    env_cls = build_environment_class(
+        scenario, _Obs, object, persona=_CountingPersona()
+    )
+    env = env_cls()
+    env.reset()
+
+    action = _make_tool_action(content="Turn 1.")
+    obs = env.step(action)
+
+    # The first plain step must terminate (1 assistant turn total, persona not called).
+    assert obs.done is True, "max_turns=1: first step must terminate"
+    assert len(persona_calls) == 0, (
+        f"max_turns=1: persona must not be called, but was called {len(persona_calls)} times"
+    )
+
+
+def test_max_turns_budget_2_gives_2_assistant_turns_1_persona_call(fake_openenv):
+    """max_turns=2: policy gets 2 assistant turns, persona is called exactly 1 time.
+
+    Matches runtime.py::run_scenario behavior.
+    """
+    from korrel.exporters.openenv import build_environment_class
+
+    FakeObservation = fake_openenv["openenv.core.env_server.types"].Observation
+
+    class _Obs(FakeObservation):
+        def __init__(self, messages=None, done=False, reward=None, **kw):
+            super().__init__(messages=messages, done=done, reward=reward, **kw)
+
+    persona_calls: list[int] = []
+
+    class _CountingPersona:
+        def next_message(self, messages: Any) -> Any:
+            persona_calls.append(1)
+            return "follow-up"
+
+    scenario = _make_scenario("budget-2-test", max_turns=2, persona=_CountingPersona())
+    env_cls = build_environment_class(
+        scenario, _Obs, object, persona=_CountingPersona()
+    )
+    env = env_cls()
+    env.reset()
+
+    action = _make_tool_action(content="Turn 1.")
+    obs1 = env.step(action)
+
+    assert obs1.done is False, "max_turns=2: first step must not terminate"
+    assert len(persona_calls) == 1, (
+        f"max_turns=2: persona must be called exactly once after step 1, "
+        f"but was called {len(persona_calls)} times"
+    )
+
+    action2 = _make_tool_action(content="Turn 2.")
+    obs2 = env.step(action2)
+
+    assert obs2.done is True, "max_turns=2: second step must terminate"
+    assert len(persona_calls) == 1, (
+        f"max_turns=2: persona must be called exactly 1 time total, "
+        f"but was called {len(persona_calls)} times"
+    )
+
+
+def test_max_turns_budget_3_gives_3_assistant_turns_2_persona_calls(fake_openenv):
+    """max_turns=3: policy gets 3 assistant turns, persona is called exactly 2 times.
+
+    Matches runtime.py::run_scenario behavior.
+    """
+    from korrel.exporters.openenv import build_environment_class
+
+    FakeObservation = fake_openenv["openenv.core.env_server.types"].Observation
+
+    class _Obs(FakeObservation):
+        def __init__(self, messages=None, done=False, reward=None, **kw):
+            super().__init__(messages=messages, done=done, reward=reward, **kw)
+
+    persona_calls: list[int] = []
+
+    class _CountingPersona:
+        def next_message(self, messages: Any) -> Any:
+            persona_calls.append(1)
+            return "follow-up"
+
+    scenario = _make_scenario("budget-3-test", max_turns=3, persona=_CountingPersona())
+    env_cls = build_environment_class(
+        scenario, _Obs, object, persona=_CountingPersona()
+    )
+    env = env_cls()
+    env.reset()
+
+    for i, content in enumerate(["Turn 1.", "Turn 2."], start=1):
+        obs = env.step(_make_tool_action(content=content))
+        assert obs.done is False, f"max_turns=3: step {i} must not terminate"
+    assert len(persona_calls) == 2, (
+        f"max_turns=3: persona must be called exactly 2 times after steps 1 and 2, "
+        f"but was called {len(persona_calls)} times"
+    )
+
+    obs3 = env.step(_make_tool_action(content="Turn 3."))
+    assert obs3.done is True, "max_turns=3: step 3 must terminate"
+    assert len(persona_calls) == 2, (
+        f"max_turns=3: persona must be called exactly 2 times total, "
+        f"but was called {len(persona_calls)} times"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Tests: reset()
 # ---------------------------------------------------------------------------
@@ -721,7 +879,13 @@ def test_step_persona_exhausted_terminal_reward_exact(fake_openenv):
 
 
 def test_step_max_turns_terminates_with_reward(fake_openenv):
-    """max_turns reached causes done=True with terminal reward."""
+    """max_turns reached causes done=True with terminal reward.
+
+    The budget matches run_scenario: for max_turns=1 the policy gets 1
+    assistant turn and the persona is never called. The cap fires when
+    user_turns >= max_turns - 1 = 0, so even user_turns=0 triggers
+    termination. user_turns=0 is the initial state after reset().
+    """
     from korrel.rubric import Rubric
     from korrel.exporters.openenv import build_environment_class
 
@@ -737,15 +901,15 @@ def test_step_max_turns_terminates_with_reward(fake_openenv):
         return expected_reward
 
     rubric = Rubric(funcs=[fixed_reward])
-    # max_turns=1: after the first user turn the episode should end.
+    # max_turns=1: the first plain assistant step immediately terminates.
+    # The cap fires at user_turns >= max_turns - 1 = 0 (initial state).
     scenario = _make_scenario("max-turns-step-test", max_turns=1, rubric=rubric)
     env_cls = build_environment_class(
         scenario, _Obs, object, persona=_FakePersona(["would-follow"])
     )
     env = env_cls()
     env.reset()
-    # Advance user_turns to the cap.
-    env._korrel_tool_round_state["user_turns"] = 1
+    # user_turns=0 (the post-reset default) is sufficient to trigger the cap for max_turns=1.
 
     action = _make_tool_action(content="Done.")
     obs = env.step(action)

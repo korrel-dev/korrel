@@ -11,6 +11,19 @@ Confirmed against: openenv-core==0.3.0 (``importlib.metadata.version
 cross-checked in Python 3.12). All openenv interface claims cite the module
 and symbol they were read from.
 
+Public entry points:
+
+- ``build_environment_class(scenario, observation_cls, action_cls, ...)``
+  The in-process translation entry point. Given a Korrel ``Scenario`` and
+  author-defined ``Action`` / ``Observation`` subclasses, it returns a concrete
+  ``openenv.core.env_server.interfaces.Environment`` subclass ready to be passed
+  to ``create_app`` or instantiated directly. This is the analog of
+  ``to_verifiers_env`` for the OpenEnv target. Raises ``ImportError`` when
+  ``openenv-core`` is absent and ``ValueError`` when ``scenario.rubric`` is None.
+- ``write_openenv_env(scenario, out_dir, ...)``
+  The artifact emitter. Writes a pip-installable OpenEnv package (the
+  ``openenv init`` file set with Korrel-specific content) to ``out_dir``.
+
 Mapping summary (per ``docs/spec/korrel-to-openenv.md``):
 
 - ``reset(seed, episode_id)`` builds the conversation seed from
@@ -23,6 +36,9 @@ Mapping summary (per ``docs/spec/korrel-to-openenv.md``):
     Persona branch: advance persona, return the user message (or terminate).
   Termination (persona exhausted or ``max_turns`` reached): ``done=True``,
   ``reward = scenario.rubric.score(messages, info).score``.
+  The turn budget matches ``runtime.py::run_scenario`` exactly: the policy
+  receives ``scenario.max_turns`` assistant turns and the persona is called at
+  most ``scenario.max_turns - 1`` times.
 - Reward is terminal only. Every intermediate step carries ``reward=None``.
 - The OpenEnv ``rubric`` base class (``action, observation`` signature) is NOT
   used; the Korrel ``Rubric.score(completion, info)`` path is called directly.
@@ -34,15 +50,15 @@ Mapping summary (per ``docs/spec/korrel-to-openenv.md``):
 
 from __future__ import annotations
 
-import inspect
 import json
+import re
 import shutil
 import textwrap
 from pathlib import Path
 from typing import Any, Optional
 
 from ..scenario import Scenario
-from ._shared import _content_to_str, _field, _to_korrel_messages  # noqa: F401
+from ._shared import _field, _sanitize_id_for_comment
 
 # ---------------------------------------------------------------------------
 # Lazy import helpers
@@ -245,8 +261,12 @@ def advance(
     tool_round_state["tool_round"] = 0
     user_turns = tool_round_state.get("user_turns", 0)
 
-    # Check if the user-turn count has reached max_turns.
-    if user_turns >= scenario.max_turns:
+    # Check if the user-turn budget is exhausted. The cap mirrors
+    # runtime.py::run_scenario: the policy gets exactly scenario.max_turns
+    # assistant turns, so the persona is called at most max_turns - 1 times
+    # (run_scenario breaks at turn_index == scenario.max_turns - 1 without
+    # calling the persona on the final turn).
+    if user_turns >= scenario.max_turns - 1:
         reward = _compute_reward(scenario, state_messages)
         return observation_cls(
             messages=[],
@@ -330,7 +350,18 @@ def build_environment_class(
     ------
     ImportError
         If ``openenv-core`` is not installed.
+    ValueError
+        If ``scenario.rubric`` is None (a reward-less RL environment is
+        meaningless).
     """
+    # Rubric check fires before the openenv import so it works even when
+    # openenv-core is absent (useful for validation in the authoring workflow).
+    if scenario.rubric is None:
+        raise ValueError(
+            "Scenario.rubric is required to build an OpenEnv environment. "
+            "A reward-less RL environment is meaningless. "
+            "Attach a Rubric with at least one reward function to the Scenario."
+        )
     oe_core = _import_openenv_core()
     Environment = oe_core.env_server.interfaces.Environment
     State = oe_core.env_server.types.State
@@ -417,24 +448,6 @@ def build_environment_class(
     KorrelOpenEnvEnvironment.__name__ = "KorrelOpenEnvEnvironment"
     KorrelOpenEnvEnvironment.__qualname__ = "KorrelOpenEnvEnvironment"
     return KorrelOpenEnvEnvironment
-
-
-# ---------------------------------------------------------------------------
-# Scenario id safety helpers (shared pattern with verifiers exporter)
-# ---------------------------------------------------------------------------
-
-
-def _sanitize_id_for_comment(scenario_id: str) -> str:
-    """Return a display-safe single-line label for use in a comment or header.
-
-    Strips leading/trailing whitespace, collapses newlines to a space, and
-    removes every occurrence of triple-double-quote so the label cannot close
-    or escape from any surrounding string region in the generated module.
-    The exact scenario id is always preserved separately via repr().
-    """
-    label = scenario_id.strip().replace("\n", " ").replace("\r", " ")
-    label = label.replace('"""', "")
-    return label
 
 
 # ---------------------------------------------------------------------------
@@ -956,10 +969,24 @@ def write_openenv_env(
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # Derive env_name from scenario.id using the same K9 guard as the CLI.
+    # Derive env_module and env_name from scenario.id (security review K9/K11).
+    # _safe_filename_stem strips directory components but does NOT remove
+    # newlines, semicolons, dots, or quotes. env_module reaches EXECUTABLE
+    # positions in the generated source (import statements, filenames), so it
+    # must be a valid Python identifier. env_name reaches package names and
+    # string literals in generated source; derive it from the same sanitized
+    # stem so no author-controlled raw character can reach those positions.
     raw_stem = _safe_filename_stem(scenario.id)
-    env_name = raw_stem.replace(" ", "-").replace("_", "-")
-    env_module = env_name.replace("-", "_")
+    # Collapse every character that is not alphanumeric or underscore to _.
+    env_module = re.sub(r"[^0-9A-Za-z_]", "_", raw_stem.replace("-", "_"))
+    # A leading digit is not valid in a Python identifier; prefix it.
+    if not env_module or env_module[0].isdigit():
+        env_module = "scenario_" + env_module
+    assert env_module.isidentifier(), (
+        f"env_module sanitization produced a non-identifier: {env_module!r}"
+    )
+    # env_name is the hyphenated form used in package names and string literals.
+    env_name = env_module.replace("_", "-")
 
     # scenario.id is author-controlled. repr() produces a syntactically valid
     # Python string literal for ANY id content (triple-quotes, newlines,

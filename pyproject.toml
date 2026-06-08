@@ -18,6 +18,12 @@ dependencies = [
 [project.optional-dependencies]
 openai = ["openai"]
 
+[project.scripts]
+korrel = "korrel.cli:main"
+
+[project.entry-points.pytest11]
+korrel = "korrel.pytest_plugin"
+
 [project.urls]
 Homepage = "https://github.com/korrel-dev/korrel"
 

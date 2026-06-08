@@ -5,7 +5,7 @@ bring-your-own agent adapter, and score the transcript with a Rubric. Keys are
 read from the environment at call time and stored nowhere.
 """
 
-from .adapter import AgentAdapter
+from .adapter import AgentAdapter, adapter_from_provider
 from .persona import Persona
 from .rubric import Rubric, RewardFn, make_judge
 from .runtime import (
@@ -32,6 +32,7 @@ __all__ = [
     "Turn",
     "FailureCluster",
     "AgentAdapter",
+    "adapter_from_provider",
     "Message",
     "ToolCall",
     "ToolFunction",

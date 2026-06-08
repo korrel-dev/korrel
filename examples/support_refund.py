@@ -1,14 +1,18 @@
 """A refund-support scenario: persona, an orders mock tool, and a rubric.
 
-This is the scenario definition only. The end-to-end run against real Claude
-arrives with the CLI in dispatch B. The smoke test drives this scenario through
-``run_scenario`` with a fake adapter and a fake persona, so it runs with no
-network and no keys.
+Run end to end (requires ANTHROPIC_API_KEY and network):
+
+    korrel run examples/support_refund.py
+
+This is a manual BYO-key check, not a CI test. The offline smoke test in
+tests/test_runtime_smoke.py drives this scenario with a fake adapter and a
+fake persona, so it runs with no network and no keys.
 """
 
 from typing import Any
 
-from korrel import MockTool, Persona, Rubric, Scenario
+from korrel import MockTool, Persona, Rubric, Scenario, adapter_from_provider
+from korrel.providers import AnthropicProvider
 from korrel.types import Message
 
 ORDERS = {
@@ -66,3 +70,7 @@ scenario = Scenario(
     info={"order_id": "A1001", "amount": 49.99, "refundable": True},
     rubric=Rubric(funcs=[confirmed_refund_amount], pass_threshold=0.5),
 )
+
+# AnthropicProvider reads ANTHROPIC_API_KEY from the environment at call time,
+# not at import time, so importing this module does not require a key.
+adapter = adapter_from_provider(AnthropicProvider())

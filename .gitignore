@@ -23,3 +23,9 @@ htmlcov/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Local environment and secrets
+.env
+
+# korrel run and pytest-plugin transcript output
+.korrel/

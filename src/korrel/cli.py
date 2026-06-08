@@ -24,14 +24,29 @@ from .scenario import Scenario
 # ---------------------------------------------------------------------------
 
 
+def _safe_filename_stem(scenario_id: str) -> str:
+    """Reduce a scenario id to a single safe path component.
+
+    A scenario id is author-controlled. Used raw as a filename it could carry
+    path separators or an absolute path and escape ``out_dir`` (security review
+    K9). ``Path(...).name`` strips any directory part on both POSIX and Windows;
+    the fallback covers ids that reduce to nothing usable (``""``, ``.``, ``..``).
+    """
+    stem = Path(scenario_id).name
+    if stem in ("", ".", ".."):
+        return "scenario"
+    return stem
+
+
 def write_transcript_for(result: RunResult, scenario_id: str, out_dir: Path) -> Path:
     """Write ``result.transcript`` as JSON and return the file path.
 
-    The file is ``<out_dir>/<scenario_id>.transcript.json``. ``out_dir`` is
-    created if it does not exist.
+    The file is ``<out_dir>/<scenario_id>.transcript.json``. ``scenario_id`` is
+    reduced to a single safe path component first. ``out_dir`` is created if it
+    does not exist.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
-    path = out_dir / f"{scenario_id}.transcript.json"
+    path = out_dir / f"{_safe_filename_stem(scenario_id)}.transcript.json"
     path.write_text(result.transcript.model_dump_json(), encoding="utf-8")
     return path
 
@@ -122,15 +137,15 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
     # Print result summary.
     status = "pass" if result.passed else "fail"
-    print(f"scenario : {scenario.id}")
-    print(f"score    : {result.score:.4f}")
-    print(f"status   : {status}")
+    print(f"{'scenario':<10}: {scenario.id}")
+    print(f"{'score':<10}: {result.score:.4f}")
+    print(f"{'status':<10}: {status}")
     if result.failed_functions:
-        print(f"failed   : {', '.join(result.failed_functions)}")
+        print(f"{'failed':<10}: {', '.join(result.failed_functions)}")
     if result.clusters:
         cluster_strs = [f"{c.function}({c.signature})" for c in result.clusters]
-        print(f"clusters : {', '.join(cluster_strs)}")
-    print(f"transcript: {transcript_path}")
+        print(f"{'clusters':<10}: {', '.join(cluster_strs)}")
+    print(f"{'transcript':<10}: {transcript_path}")
 
     # Emit telemetry. Best-effort: errors are swallowed inside emit_run.
     from .telemetry import emit_run

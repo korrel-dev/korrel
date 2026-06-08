@@ -108,10 +108,9 @@ def _is_truthy(value: str) -> bool:
 def _ci_detected() -> bool:
     """Return True when a CI environment is detected."""
     ci_env = os.environ.get("CI", "")
-    if _is_truthy(ci_env) or ci_env.strip() not in ("", "0", "false", "no", "off"):
-        # Any non-falsey non-empty value in CI counts.
-        if ci_env.strip():
-            return True
+    # Any non-empty, non-falsey value of CI counts as a CI environment.
+    if ci_env.strip() and not _is_falsey(ci_env):
+        return True
     # Known CI-specific env vars.
     ci_markers = (
         "GITHUB_ACTIONS",

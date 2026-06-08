@@ -19,7 +19,7 @@ from typing import Any, Optional
 
 import pytest
 
-from .cli import load_module_from_path, load_scenario_and_adapter, write_transcript_for
+from .cli import load_module_from_path, write_transcript_for
 from .runtime import RunResult, run_scenario
 from .scenario import Scenario
 
@@ -170,14 +170,14 @@ class KorrelItem(pytest.Item):
         exc = excinfo.value
         if isinstance(exc, KorrelScenarioFailed):
             lines = [
-                f"scenario : {exc.scenario_id}",
-                f"score    : {exc.score:.4f}",
-                f"threshold: {exc.threshold:.4f}",
-                f"status   : fail",
+                f"{'scenario':<10}: {exc.scenario_id}",
+                f"{'score':<10}: {exc.score:.4f}",
+                f"{'threshold':<10}: {exc.threshold:.4f}",
+                f"{'status':<10}: fail",
             ]
             if exc.failed_functions:
-                lines.append(f"failed   : {', '.join(exc.failed_functions)}")
-            lines.append(f"transcript: {exc.transcript_path}")
+                lines.append(f"{'failed':<10}: {', '.join(exc.failed_functions)}")
+            lines.append(f"{'transcript':<10}: {exc.transcript_path}")
             return "\n".join(lines)
         return super().repr_failure(excinfo)
 

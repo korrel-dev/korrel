@@ -1118,3 +1118,118 @@ def test_cli_export_unsupported_target(tmp_path, capsys):
     assert result == 1
     captured = capsys.readouterr()
     assert "unsupported" in captured.err.lower() or "openenv" in captured.err
+
+
+# ---------------------------------------------------------------------------
+# Regression: scenario.id with triple-quote / newline / backslash injection.
+# ---------------------------------------------------------------------------
+
+
+def test_env_module_template_hostile_id_produces_valid_python():
+    """A scenario.id containing triple-quotes, newlines, and backslashes must
+    not break the syntax of the generated env module.
+
+    The fix routes scenario.id through repr() for the _SCENARIO_ID assignment
+    (outside any string region) and through _sanitize_id_for_comment for the
+    comment header. Neither path allows the raw id to appear inside a string
+    literal or to inject arbitrary text into the generated source.
+
+    This test exercises the template rendering directly (no file I/O) so it
+    runs on all platforms without hitting OS filename restrictions.
+
+    Regression for the code-injection / syntax-break bug reported in Dispatch D.
+    """
+    from korrel.exporters.verifiers import (
+        _ENV_MODULE_TEMPLATE,
+        _sanitize_id_for_comment,
+    )
+
+    # Construct a maximally hostile id: triple-double-quote, newline, backslash.
+    hostile_id = 'evil"""\nprint("injected")\n\\'
+
+    # Render the template exactly as write_verifiers_env does.
+    source = _ENV_MODULE_TEMPLATE.format(
+        scenario_id_repr=repr(hostile_id),
+        scenario_id_label=_sanitize_id_for_comment(hostile_id),
+        scenario_attr="scenario",
+    )
+
+    # Key assertion: the generated source must parse without SyntaxError.
+    try:
+        compile(source, "<generated>", "exec")
+    except SyntaxError as exc:
+        raise AssertionError(
+            f"Generated module has a syntax error: {exc}\n\nSource:\n{source}"
+        ) from exc
+
+    # The module must still define load_environment (structural integrity check).
+    assert "def load_environment" in source, (
+        "load_environment not found in generated module after hostile id injection."
+    )
+
+    # The _SCENARIO_ID assignment must be present and use repr() output, meaning
+    # the id is enclosed in a valid Python string literal (not injected raw).
+    assert "_SCENARIO_ID = " in source, "_SCENARIO_ID assignment missing from generated source."
+
+    # The raw hostile payload must NOT appear verbatim as an unquoted sequence.
+    # The comment line has the sanitized label (no triple-quote, no newline).
+    # Find the comment line and confirm it does not contain triple-double-quote.
+    comment_line = next(
+        (ln for ln in source.splitlines() if ln.startswith("# Generated verifiers")),
+        None,
+    )
+    assert comment_line is not None, "header comment line not found in generated source"
+    assert '"""' not in comment_line, (
+        f"Unsanitized triple-double-quote found in the comment header line: {comment_line!r}"
+    )
+    assert "\n" not in comment_line, (
+        "Newline found inside the header comment line (should be single line)"
+    )
+
+
+def test_write_verifiers_env_hostile_id_produces_valid_python(tmp_path):
+    """write_verifiers_env with a hostile scenario.id produces a valid module.
+
+    Uses an id that is valid as a filesystem path component (no quotes or
+    newlines in the id itself) but contains a backslash sequence that would
+    have caused a syntax error in the old raw-interpolation code path.
+
+    This test exercises the full artifact emitter path (file I/O included)
+    and confirms that compile() succeeds on the generated file.
+
+    Regression for the code-injection / syntax-break bug reported in Dispatch D.
+    """
+    from korrel.exporters.verifiers import write_verifiers_env
+
+    # Use a backslash-containing id that is safe as a path component (single
+    # backslash is a path separator on Windows, so _safe_filename_stem will
+    # extract only the final component; the repr() of the resulting string
+    # will still include escaped backslash sequences in the generated file).
+    hostile_id = "my-scenario\\extra"
+
+    scenario = _make_scenario_for_artifact(hostile_id)
+    out = write_verifiers_env(
+        scenario,
+        tmp_path / "export",
+        scenario_attr="scenario",
+    )
+
+    # Locate the generated env module (name is derived from the sanitized id).
+    py_files = [p for p in out.iterdir() if p.suffix == ".py" and p.name != "_scenario.py"]
+    assert py_files, "no env module was written"
+    env_module_path = py_files[0]
+
+    source = env_module_path.read_text(encoding="utf-8")
+
+    # Key assertion: the generated source must parse without SyntaxError.
+    try:
+        compile(source, str(env_module_path), "exec")
+    except SyntaxError as exc:
+        raise AssertionError(
+            f"Generated module has a syntax error: {exc}\n\nSource:\n{source}"
+        ) from exc
+
+    # The module must still define load_environment (structural integrity check).
+    assert "def load_environment" in source, (
+        "load_environment not found in generated module after hostile id."
+    )

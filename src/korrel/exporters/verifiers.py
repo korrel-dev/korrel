@@ -521,6 +521,20 @@ def to_verifiers_env(
 # Artifact emitter
 # ---------------------------------------------------------------------------
 
+
+def _sanitize_id_for_comment(scenario_id: str) -> str:
+    """Return a display-safe single-line label for use in a comment or header.
+
+    Strips leading/trailing whitespace, collapses newlines to a space, and
+    removes every occurrence of triple-double-quote so the label cannot close
+    or escape from any surrounding string region in the generated module.
+    The exact scenario id is always preserved separately via repr().
+    """
+    label = scenario_id.strip().replace("\n", " ").replace("\r", " ")
+    label = label.replace('"""', "")
+    return label
+
+
 _PYPROJECT_TEMPLATE = """\
 [project]
 name = "{env_id}"
@@ -540,24 +554,32 @@ build-backend = "hatchling.build"
 include = ["{env_module}.py", "_scenario.py", "pyproject.toml"]
 """
 
+# _scenario_id_repr is substituted as repr(scenario.id) -- a syntactically
+# valid Python string literal regardless of id content (quotes, newlines,
+# backslashes). It is assigned OUTSIDE any triple-quoted region so no id
+# value can break or inject into the generated module.
+#
+# _scenario_id_label is a sanitized single-line display name used only in
+# comments; newlines and triple-quotes have been stripped. It never appears
+# inside a string literal in the generated source.
 _ENV_MODULE_TEMPLATE = '''\
-"""Generated verifiers environment for Korrel scenario: {scenario_id}.
+# Generated verifiers environment for Korrel scenario: {scenario_id_label}
+# Produced by korrel.exporters.verifiers.write_verifiers_env.
+# Built against: verifiers==0.1.14.
+#
+# The scenario source contains Python callables (tools, persona, reward
+# functions) that cannot be serialized to JSON, so the original source is
+# included in the package as _scenario.py. Propagate any changes to the
+# original scenario file by re-running ``korrel export``.
 
-This module was produced by ``korrel.exporters.verifiers.write_verifiers_env``.
-It imports the original scenario source (copied as ``_scenario.py``) and
-translates it to a verifiers Environment via ``to_verifiers_env``.
-
-The scenario source contains Python callables (tools, persona, reward functions)
-that cannot be serialized to JSON, so the original source is included in the
-package. Any changes to the original scenario file must be propagated here by
-re-running ``korrel export``.
-
-Built against: verifiers==0.1.14.
-"""
 from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+
+# _SCENARIO_ID holds the exact, unmodified scenario id. repr() is used so
+# this assignment is syntactically valid regardless of id content.
+_SCENARIO_ID = {scenario_id_repr}
 
 
 def _load_scenario():
@@ -668,10 +690,14 @@ def write_verifiers_env(
     )
 
     # <env_module>.py
+    # scenario.id is author-controlled. repr() produces a syntactically valid
+    # Python string literal regardless of id content (triple-quotes, newlines,
+    # backslashes). The sanitized label is used only in comments.
     env_module_path = out_dir / f"{env_module}.py"
     env_module_path.write_text(
         _ENV_MODULE_TEMPLATE.format(
-            scenario_id=scenario.id,
+            scenario_id_repr=repr(scenario.id),
+            scenario_id_label=_sanitize_id_for_comment(scenario.id),
             scenario_attr=scenario_attr,
         ),
         encoding="utf-8",

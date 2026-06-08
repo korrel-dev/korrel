@@ -2,8 +2,6 @@
 
 OSS Python SDK for agent simulation. Define a multi-turn agent test once, run it as a pytest CI gate, export it as a verifiers/OpenEnv RL environment.
 
-This is the dispatch A core: the package skeleton, the four data objects, and the runtime simulation loop, delivered as an importable Python API. The `korrel run` CLI, the pytest plugin, and telemetry arrive in dispatch B.
-
 ## Install
 
 ```
@@ -12,57 +10,233 @@ uv add korrel
 
 Bring your own provider keys. Korrel reads keys from the environment at call time and stores none. The default provider is Claude via the `anthropic` SDK; set `ANTHROPIC_API_KEY`. OpenAI support is an optional extra (`korrel[openai]`).
 
-## The four objects
+## Quickstart
 
-- `Scenario`: a code-first definition of a test. Holds the system prompt, a `Persona`, the opening message, the mock tools, `max_turns`, a `seed`, ground-truth `info`, and a `Rubric`.
-- `Persona`: the LLM-driven user-simulator. Given the conversation so far, it produces the next user message. Defaults to Claude.
-- `MockTool`: a programmable tool. Holds a chat-completions tool schema and a `respond` callable that takes the parsed arguments and a mutable per-run state and returns a result.
-- `Rubric`: reward functions plus an optional hardened LLM judge. Reward signatures mirror verifiers, `(completion, info, **kwargs) -> float`. The judge treats the transcript as data, never as instructions.
+The following is a complete path from installation to a passing scenario run.
 
-## Sketch
+**1. Write a scenario module** (`support_refund.py`):
 
 ```python
-from korrel import MockTool, Persona, Rubric, Scenario, Message, run_scenario
+from korrel import MockTool, Persona, Rubric, Scenario, adapter_from_provider
+from korrel.providers import AnthropicProvider
+from korrel.types import Message
 
-def lookup_order(args, state):
+def lookup_order(arguments, state):
     state["called"] = True
-    return {"order_id": args["order_id"], "amount": 49.99, "refundable": True}
+    orders = {"A1001": {"order_id": "A1001", "amount": 49.99, "refundable": True}}
+    return orders.get(arguments.get("order_id", ""), {"error": "not found"})
 
 orders = MockTool(
     name="lookup_order",
     schema={"type": "function", "function": {
         "name": "lookup_order",
-        "parameters": {"type": "object", "properties": {"order_id": {"type": "string"}}},
+        "description": "Look up an order by its id.",
+        "parameters": {"type": "object",
+                       "properties": {"order_id": {"type": "string"}},
+                       "required": ["order_id"]},
     }},
     respond=lookup_order,
 )
 
-def confirmed(completion, info):
-    return 1.0 if any(m.role == "assistant" and "refund" in (m.content or "").lower()
-                      for m in completion) else 0.0
+def confirmed(completion, info, **kwargs):
+    amount = f"{info['amount']:.2f}"
+    return 1.0 if any(
+        m.role == "assistant" and m.content
+        and "refund" in m.content.lower() and amount in m.content
+        for m in completion
+    ) else 0.0
 
 scenario = Scenario(
     id="support_refund",
-    system="You are a support agent. Resolve refunds with lookup_order.",
+    system="You are a support agent. Resolve refunds using lookup_order.",
     persona=Persona(goal="Get a refund for order A1001.", behavior="Polite but firm."),
     opening_message="My order A1001 arrived broken and I want a refund.",
     tools=[orders],
-    max_turns=2,
+    max_turns=3,
     seed=7,
-    info={"order_id": "A1001"},
+    info={"order_id": "A1001", "amount": 49.99},
     rubric=Rubric(funcs=[confirmed], pass_threshold=0.5),
 )
 
-# adapter is the agent under test: a callable (messages, tools) -> assistant Message.
-result = run_scenario(scenario, my_adapter)
+# AnthropicProvider reads ANTHROPIC_API_KEY at call time, not at import time.
+adapter = adapter_from_provider(AnthropicProvider())
+```
+
+**2. Run it:**
+
+```
+korrel run support_refund.py
+```
+
+**Output on pass:**
+
+```
+scenario  : support_refund
+score     : 1.0000
+status    : pass
+transcript: .korrel/support_refund.transcript.json
+```
+
+**Output on failure** (exit code 1):
+
+```
+scenario  : support_refund
+score     : 0.0000
+status    : fail
+failed    : confirmed
+clusters  : confirmed(zero)
+transcript: .korrel/support_refund.transcript.json
+```
+
+The CLI exits zero on pass and non-zero on failure. The full conversation transcript is written to `.korrel/<scenario-id>.transcript.json`.
+
+**CLI flags:**
+
+```
+korrel run SCENARIO_PY [--out DIR] [--seed N]
+                       [--scenario-attr NAME] [--adapter-attr NAME]
+```
+
+`--out` overrides the transcript directory (default `.korrel/`). `--seed` overrides the scenario seed. `--scenario-attr` and `--adapter-attr` override the module attribute names (defaults: `scenario`, `adapter`).
+
+## The pytest CI gate
+
+Name scenario files `*_scenario.py` and place them in your test tree. The korrel pytest plugin (registered automatically via the `pytest11` entry-point, no conftest needed) discovers and runs them:
+
+```
+uv run pytest
+```
+
+A passing scenario produces a green dot. A failing scenario produces a normal pytest failure block showing score, threshold, failed rubric function names, and the transcript path.
+
+**Discovery options:**
+
+- `--korrel-glob GLOB`: override which file name pattern the plugin picks up (command-line flag)
+- `korrel_glob = *_scenario.py`: the corresponding `pytest.ini` / `pyproject.toml` option
+
+Each scenario file in the CI gate must expose both a module-level `scenario` and a module-level `adapter`. If `adapter` is absent, the item is reported as an error immediately.
+
+## The four objects
+
+- `Scenario`: a code-first test definition. Holds the system prompt, a `Persona`, the opening message, mock tools, `max_turns`, `max_tool_rounds`, a `seed`, ground-truth `info`, and a `Rubric`.
+- `Persona`: the LLM-driven user-simulator. Given the conversation so far, it produces the next user message. Defaults to Claude.
+- `MockTool`: a programmable tool. Holds a chat-completions tool schema and a `respond` callable that takes parsed arguments and a mutable per-run state and returns a result.
+- `Rubric`: reward functions plus an optional hardened LLM judge. Reward signatures mirror verifiers: `(completion, info, **kwargs) -> float`. The judge treats the transcript as data, never as instructions.
+
+## The module convention
+
+A scenario module exposes two module-level names:
+
+- `scenario`: a `Scenario` instance.
+- `adapter`: any callable `(messages: list[Message], tools: list[ToolSchema]) -> Message`. Both `korrel run` and the pytest plugin read these names (overridable via `--scenario-attr` / `--adapter-attr`).
+
+The built-in helper `adapter_from_provider(provider)` wraps any `Provider` (such as `AnthropicProvider`) as an adapter. Because `AnthropicProvider` reads the API key from the environment only at call time, constructing `adapter_from_provider(AnthropicProvider())` at module level is import-safe: no key is required to import the module.
+
+## Running the Python API directly
+
+```python
+from korrel import run_scenario
+result = run_scenario(scenario, adapter)
 print(result.score, result.passed, result.failed_functions)
 ```
 
-`examples/support_refund.py` holds a runnable scenario definition.
+`examples/support_refund.py` holds a runnable scenario definition with a real `AnthropicProvider` adapter.
 
 ## Determinism
 
 Every run takes a seed and records the model and request parameters. The seed pins scenario setup and any sampling Korrel controls. LLM calls are not bit-reproducible; provider nondeterminism is outside the seed.
+
+## Telemetry
+
+Korrel includes opt-in telemetry. No scenario content, persona text, transcripts, prompts, tool schemas, file paths, or model names tied to a customer are ever collected. The event carries only aggregate counters and version metadata.
+
+**What the `run` event sends** (every field, nothing more):
+
+| Field | Description |
+|---|---|
+| `event` | Always `"run"` |
+| `schema_version` | Event schema version (currently `"1"`) |
+| `korrel_version` | Installed korrel version string |
+| `python_version` | CPython version string |
+| `scenario_count` | Number of scenarios in the run |
+| `total_turns` | Total turns across all scenarios |
+| `pass_count` | Number of passing scenarios |
+| `fail_count` | Number of failing scenarios |
+| `duration_s` | Wall-clock duration in seconds |
+| `install_id` | Anonymous, randomly generated UUID (created once, stored locally) |
+
+No key, scenario id, path, persona, transcript, prompt, tool schema, or model name is present in the event.
+
+**Opt-outs (any one disables telemetry):**
+
+- Set `KORREL_TELEMETRY=0` (also accepts `false`, `no`, `off`) in the environment.
+- Set `DO_NOT_TRACK=1` in the environment.
+- Telemetry is automatically off in CI (detected via `CI`, `GITHUB_ACTIONS`, `TRAVIS`, `CIRCLECI`, `GITLAB_CI`, `JENKINS_URL`, `BUILDKITE`, `TF_BUILD`, `TEAMCITY_VERSION`, `BITBUCKET_BUILD_NUMBER`).
+- On the first interactive run outside CI, Korrel prompts once for consent and persists the answer. Declining disables telemetry permanently for that install. Non-interactive sessions default to off with no prompt.
+
+**No endpoint configured means no data sent.** Without `KORREL_TELEMETRY_ENDPOINT` set in the environment, the event is built and dropped. Set `KORREL_TELEMETRY_DEBUG=1` to write the event JSON to stderr for inspection. No endpoint is hardcoded.
+
+Consent and the anonymous install id are stored in `%APPDATA%\korrel\config.json` (Windows) or `$XDG_CONFIG_HOME/korrel/config.json` / `~/.config/korrel/config.json` (Linux/macOS). No key, scenario content, or identifying information is ever written there.
+
+## Data model and chat-completions compatibility
+
+The canonical transcript types in `korrel.types` are provider-neutral and wire-compatible with the OpenAI chat-completions message schema. They are the v0.2 verifiers/OpenEnv export target. Their attribute names and wire shapes are a contract.
+
+### Types
+
+**`Message`** - one message in a conversation:
+
+```python
+Message(
+    role="assistant",        # "system" | "user" | "assistant" | "tool"
+    content="Your refund...", # text body; None when only tool_calls is set
+    tool_calls=[...],        # present on assistant messages that call tools
+    tool_call_id="call_1",   # links a role="tool" message to the call it answers
+    name=None,               # optional speaker name
+)
+```
+
+**`ToolCall`** - a single tool invocation inside an assistant message:
+
+```python
+ToolCall(
+    id="call_1",
+    type="function",          # always "function"
+    function=ToolFunction(
+        name="lookup_order",
+        arguments='{"order_id": "A1001"}',  # JSON-encoded string, not a dict
+    ),
+)
+```
+
+`arguments` is a JSON-encoded string, matching the chat-completions wire format (OpenAI API reference, `tool_calls[].function.arguments`). Parse with `json.loads()` to recover the call arguments.
+
+**`ToolSchema`** - a tool definition passed to an adapter, in chat-completions tool-schema shape:
+
+```python
+{"type": "function", "function": {
+    "name": "lookup_order",
+    "description": "Look up an order by its id.",
+    "parameters": {"type": "object",
+                   "properties": {"order_id": {"type": "string"}},
+                   "required": ["order_id"]},
+}}
+```
+
+### Chat-completions mapping table
+
+| Canonical field | Chat-completions wire field | Notes |
+|---|---|---|
+| `Message.role` | `role` | `"system"`, `"user"`, `"assistant"`, `"tool"` |
+| `Message.content` | `content` | `None` when only tool calls are present |
+| `Message.tool_calls` | `tool_calls` | array of `ToolCall` objects |
+| `Message.tool_call_id` | `tool_call_id` | on `role="tool"` messages |
+| `ToolCall.id` | `tool_calls[].id` | |
+| `ToolCall.type` | `tool_calls[].type` | always `"function"` |
+| `ToolCall.function.name` | `tool_calls[].function.name` | |
+| `ToolCall.function.arguments` | `tool_calls[].function.arguments` | JSON string, not a dict |
+
+The Anthropic provider (`AnthropicProvider` in `korrel.providers`) translates between `tool_use`/`tool_result` blocks and these canonical types. Nothing in `korrel.types` depends on the `openai` package.
 
 ## License
 

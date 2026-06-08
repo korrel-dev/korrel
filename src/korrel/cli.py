@@ -123,7 +123,7 @@ def load_scenario_only(
 # `korrel export` command
 # ---------------------------------------------------------------------------
 
-_SUPPORTED_TARGETS = ("verifiers",)
+_SUPPORTED_TARGETS = ("verifiers", "openenv")
 
 
 def _cmd_export(args: argparse.Namespace) -> int:
@@ -190,6 +190,30 @@ def _cmd_export(args: argparse.Namespace) -> int:
         print(f"{'out_dir':<12}: {produced}")
         print(f"{'pyproject':<12}: {pyproject}")
         print(f"{'env_module':<12}: {env_module_py}")
+        print(f"{'scenario_src':<12}: {scenario_py}")
+
+    elif target == "openenv":
+        # Import the artifact emitter (does not import openenv-core itself).
+        from .exporters.openenv import write_openenv_env
+
+        produced = write_openenv_env(
+            scenario,
+            out_dir,
+            scenario_source_path=file_path,
+            scenario_attr=args.scenario_attr,
+        )
+        env_name = _safe_filename_stem(scenario.id).replace("_", "-")
+        env_module = env_name.replace("-", "_")
+        pyproject = produced / "pyproject.toml"
+        models_py = produced / "models.py"
+        env_py = produced / "server" / f"{env_module}_environment.py"
+        scenario_py = produced / "_scenario.py"
+        print(f"{'target':<12}: openenv")
+        print(f"{'scenario':<12}: {scenario.id}")
+        print(f"{'out_dir':<12}: {produced}")
+        print(f"{'pyproject':<12}: {pyproject}")
+        print(f"{'models':<12}: {models_py}")
+        print(f"{'environment':<12}: {env_py}")
         print(f"{'scenario_src':<12}: {scenario_py}")
 
     return 0

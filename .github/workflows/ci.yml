@@ -46,3 +46,21 @@ jobs:
 
       - name: Run tests
         run: uv run pytest
+
+  openenv-export:
+    name: openenv-export (Python 3.13)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6.0.3
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v8.2.0
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies with openenv extra
+        run: uv sync --extra openenv
+
+      - name: Run tests
+        run: uv run pytest

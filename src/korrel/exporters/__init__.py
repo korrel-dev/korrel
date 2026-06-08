@@ -9,4 +9,6 @@ Available submodules:
 
 - ``korrel.exporters.verifiers``: export a Scenario as a verifiers
   Environment (requires the ``verifiers`` optional extra, Python <3.14).
+- ``korrel.exporters.openenv``: export a Scenario as an OpenEnv environment
+  package (requires the ``openenv`` optional extra; openenv-core>=0.3.0).
 """

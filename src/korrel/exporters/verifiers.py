@@ -37,6 +37,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
 from ..scenario import Scenario
+from ._shared import _sanitize_id_for_comment
 
 if TYPE_CHECKING:
     # Type-only: these are never imported at module load when verifiers is absent.
@@ -79,113 +80,13 @@ def _import_datasets() -> Any:
 
 
 # ---------------------------------------------------------------------------
-# Internal conversion helpers (no verifiers import at definition time)
+# Internal conversion helpers (imported from the shared module)
 # ---------------------------------------------------------------------------
 
-
-def _field(obj: Any, key: str, default: Any = None) -> Any:
-    """Read a field from a verifiers message or tool call.
-
-    The value may arrive as a pydantic object attribute or a plain dict entry.
-    Unlike ``getattr(...) or dict.get(...)``, this does not treat a falsy-but-
-    present value (an empty string content) as missing: only ``None`` or a
-    truly absent key falls back to ``default``.
-    """
-    if isinstance(obj, dict):
-        return obj.get(key, default)
-    value = getattr(obj, key, default)
-    return default if value is None else value
-
-
-def _content_to_str(content: Any) -> str:
-    """Narrow verifiers MessageContent (str | list[ContentPart]) to str.
-
-    Verifiers content may be a list of content parts (text, image, audio).
-    Korrel canonical content is Optional[str]. String content passes through;
-    list content is serialized as JSON per the spec (lossy edge: content-shape
-    narrowing documented in the mapping spec).
-    """
-    if content is None:
-        return ""
-    if isinstance(content, str):
-        return content
-    # List of content parts: join text parts, serialize non-text as JSON.
-    parts: list[str] = []
-    for part in content:
-        if isinstance(part, dict):
-            if part.get("type") == "text":
-                parts.append(part.get("text", ""))
-            else:
-                parts.append(json.dumps(part))
-        elif hasattr(part, "type"):
-            if getattr(part, "type", None) == "text":
-                parts.append(getattr(part, "text", ""))
-            else:
-                parts.append(json.dumps(part.model_dump() if hasattr(part, "model_dump") else str(part)))
-        else:
-            parts.append(str(part))
-    return "".join(parts)
-
-
-def _to_korrel_messages(vf_messages: list[Any]) -> list[Any]:
-    """Convert a list of verifiers Messages to korrel canonical Messages.
-
-    Field-by-field per the mapping spec (Section: Reward-function value shim):
-    - system/user/assistant without tool calls: content narrowed to str.
-    - assistant with tool calls: FLAT vf.ToolCall{id,name,arguments} ->
-      NESTED korrel.ToolCall{id,type:"function",function:{name,arguments}}.
-    - tool result: ToolMessage{role:"tool",tool_call_id,content}.
-    ``arguments`` stays a JSON string on both sides.
-    """
-    from ..types import Message, ToolCall, ToolFunction
-
-    result: list[Message] = []
-    for msg in vf_messages:
-        role = _field(msg, "role")
-        if role is None:
-            continue
-
-        if role == "system":
-            result.append(Message(role="system", content=_content_to_str(_field(msg, "content"))))
-
-        elif role == "user":
-            result.append(Message(role="user", content=_content_to_str(_field(msg, "content"))))
-
-        elif role == "assistant":
-            content = _field(msg, "content")
-            vf_tool_calls = _field(msg, "tool_calls")
-            korrel_tool_calls: Optional[list[ToolCall]] = None
-            if vf_tool_calls:
-                korrel_tool_calls = []
-                for tc in vf_tool_calls:
-                    tc_id = _field(tc, "id", "") or ""
-                    tc_name = _field(tc, "name", "") or ""
-                    tc_args = _field(tc, "arguments", "{}") or "{}"
-                    korrel_tool_calls.append(
-                        ToolCall(
-                            id=tc_id,
-                            type="function",
-                            function=ToolFunction(name=tc_name, arguments=tc_args),
-                        )
-                    )
-            result.append(
-                Message(
-                    role="assistant",
-                    content=_content_to_str(content) if content is not None else None,
-                    tool_calls=korrel_tool_calls or None,
-                )
-            )
-
-        elif role == "tool":
-            result.append(
-                Message(
-                    role="tool",
-                    content=_content_to_str(_field(msg, "content")),
-                    tool_call_id=_field(msg, "tool_call_id"),
-                )
-            )
-
-    return result
+# These three helpers are defined in _shared.py so both the verifiers and
+# openenv exporters can use them without duplication. They are re-exported here
+# so existing call sites (tests, other importers) continue to work unchanged.
+from ._shared import _content_to_str, _field, _to_korrel_messages  # noqa: F401
 
 
 # ---------------------------------------------------------------------------
@@ -521,6 +422,7 @@ def to_verifiers_env(
 # Artifact emitter
 # ---------------------------------------------------------------------------
 
+
 _PYPROJECT_TEMPLATE = """\
 [project]
 name = "{env_id}"
@@ -540,24 +442,32 @@ build-backend = "hatchling.build"
 include = ["{env_module}.py", "_scenario.py", "pyproject.toml"]
 """
 
+# _scenario_id_repr is substituted as repr(scenario.id) -- a syntactically
+# valid Python string literal regardless of id content (quotes, newlines,
+# backslashes). It is assigned OUTSIDE any triple-quoted region so no id
+# value can break or inject into the generated module.
+#
+# _scenario_id_label is a sanitized single-line display name used only in
+# comments; newlines and triple-quotes have been stripped. It never appears
+# inside a string literal in the generated source.
 _ENV_MODULE_TEMPLATE = '''\
-"""Generated verifiers environment for Korrel scenario: {scenario_id}.
+# Generated verifiers environment for Korrel scenario: {scenario_id_label}
+# Produced by korrel.exporters.verifiers.write_verifiers_env.
+# Built against: verifiers==0.1.14.
+#
+# The scenario source contains Python callables (tools, persona, reward
+# functions) that cannot be serialized to JSON, so the original source is
+# included in the package as _scenario.py. Propagate any changes to the
+# original scenario file by re-running ``korrel export``.
 
-This module was produced by ``korrel.exporters.verifiers.write_verifiers_env``.
-It imports the original scenario source (copied as ``_scenario.py``) and
-translates it to a verifiers Environment via ``to_verifiers_env``.
-
-The scenario source contains Python callables (tools, persona, reward functions)
-that cannot be serialized to JSON, so the original source is included in the
-package. Any changes to the original scenario file must be propagated here by
-re-running ``korrel export``.
-
-Built against: verifiers==0.1.14.
-"""
 from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+
+# _SCENARIO_ID holds the exact, unmodified scenario id. repr() is used so
+# this assignment is syntactically valid regardless of id content.
+_SCENARIO_ID = {scenario_id_repr}
 
 
 def _load_scenario():
@@ -668,10 +578,14 @@ def write_verifiers_env(
     )
 
     # <env_module>.py
+    # scenario.id is author-controlled. repr() produces a syntactically valid
+    # Python string literal regardless of id content (triple-quotes, newlines,
+    # backslashes). The sanitized label is used only in comments.
     env_module_path = out_dir / f"{env_module}.py"
     env_module_path.write_text(
         _ENV_MODULE_TEMPLATE.format(
-            scenario_id=scenario.id,
+            scenario_id_repr=repr(scenario.id),
+            scenario_id_label=_sanitize_id_for_comment(scenario.id),
             scenario_attr=scenario_attr,
         ),
         encoding="utf-8",

@@ -1,0 +1,52 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "korrel-benchmarks"
+version = "0.1.0"
+description = "Reproducibility benchmark: korrel tau2 fidelity harness"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    # korrel from the local checkout, with verifiers + openenv extras.
+    # verifiers requires Python <3.14; openenv-core is 3.10-3.14.
+    "korrel[verifiers,openenv]",
+    # tau2-bench pinned to the exact tag v1.0.0 commit.
+    # SHA verified via `gh api repos/sierra-research/tau2-bench/git/refs/tags/v1.0.0`
+    # on 2026-06-10: object.sha = 17e07b1da2bbc0cadfddeea36412686e0604127b.
+    #
+    # tau2.__init__ unconditionally imports tau2.runner -> tau2.agent -> tau2.voice,
+    # which requires all voice-extra packages even for text-only evaluation.
+    # The voice extra is listed in tau2's pyproject.toml and includes: elevenlabs,
+    # deepgram-sdk, websockets, pyaudio, jiwer, scipy, pydub, tqdm, aiohttp,
+    # google-genai, boto3, aws-sdk-bedrock-runtime, google-cloud-aiplatform,
+    # google-auth. Confirmed from tau2 v1.0.0 pyproject.toml.
+    # knowledge extra needed because tau2.registry unconditionally imports
+    # tau2.domains.banking_knowledge which needs rank-bm25 and openai.
+    # Confirmed from tau2 v1.0.0 registry.py and banking_knowledge/retrieval.py.
+    "tau2[voice,knowledge]",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = []
+
+[dependency-groups]
+dev = [
+    "hypothesis>=6",
+    "pytest>=8",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = [
+    'ignore:Field name "schema".*:UserWarning',
+]
+
+[tool.uv]
+# Keep benchmarks isolated from the root korrel venv.
+package = false
+
+[tool.uv.sources]
+# uv resolves the local path relative to this pyproject.toml.
+korrel = { path = "..", editable = true }
+tau2 = { git = "https://github.com/sierra-research/tau2-bench", rev = "17e07b1da2bbc0cadfddeea36412686e0604127b" }

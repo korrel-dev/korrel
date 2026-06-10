@@ -1,0 +1,9 @@
+# Virtual environment created by uv sync inside benchmarks/
+.venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# uv artefacts
+.uv/

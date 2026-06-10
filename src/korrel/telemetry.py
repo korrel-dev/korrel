@@ -228,9 +228,10 @@ def build_run_event(
 # The default sender uses urllib.request. Tests inject a recording sender.
 Sender = Callable[[dict[str, Any]], None]
 
-# The public, unauthenticated, content-free collector (per the cloud
-# collector design). KORREL_TELEMETRY_ENDPOINT overrides it for
-# self-hosting.
+# The public, unauthenticated, content-free telemetry collector. korrel posts
+# the opt-in run event here by default; KORREL_TELEMETRY_ENDPOINT overrides
+# the destination for self-hosting. See the README telemetry section for the
+# exact fields and opt-outs.
 _DEFAULT_TELEMETRY_ENDPOINT = (
     "https://tsbvccnafjkqgizbbdwy.supabase.co/functions/v1/telemetry"
 )

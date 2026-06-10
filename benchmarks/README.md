@@ -221,6 +221,17 @@ corresponding frozen transcript, across all three runtimes.
 
 ---
 
+## Prerequisites
+
+- uv on PATH.
+- Python 3.13 (uv will install it if absent via `.python-version`).
+- On Windows: enable git long-path support before running `make sync`:
+    ```
+    git config --global core.longpaths true
+    ```
+  tau2's `web/leaderboard/` subdirectory contains filenames that exceed the
+  Windows 260-character MAX_PATH limit. uv sync will fail without this setting.
+
 ## How to rerun
 
 **Fidelity harness (offline, no keys):**

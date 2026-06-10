@@ -58,6 +58,13 @@ def test_runtime_smoke_runs_loop_end_to_end():
     # The persona produced the follow-up user turn.
     assert persona.calls == 1
 
+    # model_calls is the exact count of loop-issued model calls: one per agent
+    # (adapter) invocation, one per user-simulator (persona) call. This run has
+    # one tool round, so the adapter is called three times (opening turn, tool
+    # follow-up, closing turn) and the persona once: four calls total.
+    assert result.model_calls == adapter.calls + persona.calls
+    assert result.model_calls == 4
+
     # The transcript records the seed and the simulator model.
     assert result.transcript.seed == 7
     assert result.transcript.model == "fake-persona"
@@ -92,3 +99,43 @@ def test_unknown_tool_call_yields_error_result():
     assert len(tool_messages) == 1
     payload = json.loads(tool_messages[0].content)
     assert "error" in payload
+
+
+def _no_tool_scenario(max_turns: int):
+    from korrel import Persona, Rubric, Scenario
+
+    def always_one(completion, info, **kwargs):
+        return 1.0
+
+    return Scenario(
+        id="no_tool",
+        system="sys",
+        persona=Persona(goal="g", behavior="b"),
+        opening_message="hello",
+        max_turns=max_turns,
+        seed=1,
+        rubric=Rubric(funcs=[always_one], pass_threshold=0.5),
+    )
+
+
+def test_model_calls_no_tool_round_is_two_t_minus_one():
+    # A scenario with no tools and no judge over T turns issues T agent calls
+    # and T-1 user-simulator calls: the 2T-1 rule of thumb. Here T=3 -> 5.
+    scenario = _no_tool_scenario(max_turns=3)
+    adapter = ScriptedAdapter(
+        [
+            Message(role="assistant", content="one"),
+            Message(role="assistant", content="two"),
+            Message(role="assistant", content="three"),
+        ]
+    )
+    persona = ScriptedPersona(["again", "more"])
+
+    result = run_scenario(scenario, adapter, persona=persona, seed=1)
+
+    # No tool messages: the count is pure agent + persona calls.
+    assert all(m.role != "tool" for m in result.transcript.messages)
+    assert adapter.calls == 3
+    assert persona.calls == 2
+    assert result.model_calls == adapter.calls + persona.calls
+    assert result.model_calls == 5  # 2 * 3 - 1

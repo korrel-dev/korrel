@@ -71,21 +71,23 @@ korrel run support_refund.py
 **Output on pass:**
 
 ```
-scenario  : support_refund
-score     : 1.0000
-status    : pass
-transcript: .korrel/support_refund.transcript.json
+scenario    : support_refund
+score       : 1.0000
+status      : pass
+model calls : 6
+transcript  : .korrel/support_refund.transcript.json
 ```
 
 **Output on failure** (exit code 1):
 
 ```
-scenario  : support_refund
-score     : 0.0000
-status    : fail
-failed    : confirmed
-clusters  : confirmed(zero)
-transcript: .korrel/support_refund.transcript.json
+scenario    : support_refund
+score       : 0.0000
+status      : fail
+model calls : 6
+failed      : confirmed
+clusters    : confirmed(zero)
+transcript  : .korrel/support_refund.transcript.json
 ```
 
 The CLI exits zero on pass and non-zero on failure. The full conversation transcript is written to `.korrel/<scenario-id>.transcript.json`.
@@ -98,6 +100,21 @@ korrel run SCENARIO_PY [--out DIR] [--seed N]
 ```
 
 `--out` overrides the transcript directory (default `.korrel/`). `--seed` overrides the scenario seed. `--scenario-attr` and `--adapter-attr` override the module attribute names (defaults: `scenario`, `adapter`).
+
+## Cost
+
+Korrel is bring-your-own-keys. Every model call a run makes is billed to your own provider account. Korrel stores no key and bills nothing; the key is read from the environment at call time and stored nowhere. The cost of a run is the number of model calls it makes, so the figures below are stated in model calls, not dollars (the price per call depends on your provider and tier).
+
+A run of one scenario makes these calls:
+
+- One call to the agent under test at the start of each turn.
+- One additional agent call for each tool-use round in a turn (running a mock tool is local Python, not a model call).
+- One call to the user-simulator (the `Persona`) per turn that continues. The opening message is a fixed string and makes no call, and the final turn makes no user-simulator call.
+- One call for an LLM judge, if the rubric has one, made once per run at scoring time. A plain reward function is local Python and makes no call.
+
+As a rule of thumb, a scenario of `T` turns with no tool rounds and no judge is about `2T - 1` calls: `T` agent calls plus `T - 1` user-simulator calls. Each tool round adds one agent call; a judge adds one call.
+
+`korrel run` prints the measured number of calls the simulation loop made for the run, on the `model calls` line of the summary. That count covers the agent and user-simulator calls the loop issues. It does not yet include the judge's scoring-time call, which happens inside the rubric after the loop ends.
 
 ## The pytest CI gate
 

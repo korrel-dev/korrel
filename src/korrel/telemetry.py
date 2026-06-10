@@ -165,7 +165,9 @@ def _prompt_consent(config: dict[str, Any]) -> bool:
         sys.stderr.write(
             "\nkorrel collects anonymous usage data (run counts, pass/fail "
             "aggregates) to improve the project. No scenario content, "
-            "prompts, transcripts, or identifying information is sent.\n"
+            "prompts, transcripts, or identifying information is sent. "
+            "Running a scenario spends your own provider credits. Korrel "
+            "bills nothing.\n"
             "Allow? [y/N] "
         )
         sys.stderr.flush()

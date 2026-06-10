@@ -66,6 +66,13 @@ class RunResult(BaseModel):
     failed_functions: list[str]
     clusters: list[FailureCluster]
     rubric_result: RubricResult
+    # Count of model calls the simulation loop itself issued: one per agent
+    # (adapter) invocation, one per user-simulator (persona) call. Exact for the
+    # documented adapter_from_provider path (one provider call per invocation).
+    # Excludes calls made inside a custom adapter's own internals (Korrel cannot
+    # see them) and the judge's scoring-time call (it runs inside rubric.score,
+    # outside the loop). Every counted call is billed to the user's provider key.
+    model_calls: int = 0
 
 
 def _tool_schemas(scenario: Scenario) -> list[dict[str, Any]]:
@@ -134,6 +141,11 @@ def run_scenario(
         role="user", content=scenario.opening_message
     )
 
+    # Count of model calls the loop issues (agent + user-simulator). Kept local
+    # to this run and carried out on RunResult; no module-level state, so it
+    # cannot leak across runs.
+    model_calls = 0
+
     for turn_index in range(scenario.max_turns):
         turn_messages: list[Message] = []
         if pending_user is not None:
@@ -142,6 +154,7 @@ def run_scenario(
             pending_user = None
 
         assistant = adapter(messages, tool_schemas)
+        model_calls += 1
         messages.append(assistant)
         turn_messages.append(assistant)
 
@@ -156,6 +169,7 @@ def run_scenario(
                 messages.append(tool_message)
                 turn_messages.append(tool_message)
             assistant = adapter(messages, tool_schemas)
+            model_calls += 1
             messages.append(assistant)
             turn_messages.append(assistant)
             tool_round += 1
@@ -166,6 +180,7 @@ def run_scenario(
             break
 
         next_user = user_sim.next_message(messages)
+        model_calls += 1
         if not next_user:
             break
         pending_user = Message(role="user", content=next_user)
@@ -195,4 +210,5 @@ def run_scenario(
         failed_functions=rubric_result.failed_functions,
         clusters=clusters,
         rubric_result=rubric_result,
+        model_calls=model_calls,
     )

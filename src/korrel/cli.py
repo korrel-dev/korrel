@@ -254,17 +254,19 @@ def _cmd_run(args: argparse.Namespace) -> int:
     out_dir = Path(args.out) if args.out else Path(".korrel")
     transcript_path = write_transcript_for(result, scenario.id, out_dir)
 
-    # Print result summary.
+    # Print result summary. The "model calls" label is wider than the prior
+    # 10-char pad, so the pad is widened to 12 across every line to stay aligned.
     status = "pass" if result.passed else "fail"
-    print(f"{'scenario':<10}: {scenario.id}")
-    print(f"{'score':<10}: {result.score:.4f}")
-    print(f"{'status':<10}: {status}")
+    print(f"{'scenario':<12}: {scenario.id}")
+    print(f"{'score':<12}: {result.score:.4f}")
+    print(f"{'status':<12}: {status}")
+    print(f"{'model calls':<12}: {result.model_calls}")
     if result.failed_functions:
-        print(f"{'failed':<10}: {', '.join(result.failed_functions)}")
+        print(f"{'failed':<12}: {', '.join(result.failed_functions)}")
     if result.clusters:
         cluster_strs = [f"{c.function}({c.signature})" for c in result.clusters]
-        print(f"{'clusters':<10}: {', '.join(cluster_strs)}")
-    print(f"{'transcript':<10}: {transcript_path}")
+        print(f"{'clusters':<12}: {', '.join(cluster_strs)}")
+    print(f"{'transcript':<12}: {transcript_path}")
 
     # Emit telemetry. Best-effort: errors are swallowed inside emit_run.
     from .telemetry import emit_run

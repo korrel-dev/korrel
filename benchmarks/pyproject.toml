@@ -30,6 +30,18 @@ dependencies = [
 [tool.hatch.build.targets.wheel]
 packages = []
 
+[dependency-groups]
+dev = [
+    "hypothesis>=6",
+    "pytest>=8",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = [
+    'ignore:Field name "schema".*:UserWarning',
+]
+
 [tool.uv]
 # Keep benchmarks isolated from the root korrel venv.
 package = false

@@ -272,7 +272,8 @@ def _debug_sender(event: dict[str, Any]) -> None:
 
 
 def _default_sender(event: dict[str, Any]) -> None:
-    """Drop the event unless an endpoint or debug flag is set."""
+    """POST the event to the resolved collector, or write it to stderr
+    when KORREL_TELEMETRY_DEBUG is set."""
     if os.environ.get("KORREL_TELEMETRY_DEBUG", ""):
         _debug_sender(event)
     else:

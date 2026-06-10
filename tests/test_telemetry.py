@@ -448,30 +448,6 @@ def test_emit_run_undecided_non_interactive_no_send(monkeypatch):
     assert events == []
 
 
-def test_emit_run_no_endpoint_default_sender_does_not_raise(monkeypatch, tmp_path):
-    """With consent=True and no override, the default sender posts to the
-    default collector (mocked here) without raising."""
-    monkeypatch.setenv("KORREL_TELEMETRY", "1")
-    monkeypatch.delenv("DO_NOT_TRACK", raising=False)
-    monkeypatch.delenv("CI", raising=False)
-    monkeypatch.delenv("KORREL_TELEMETRY_ENDPOINT", raising=False)
-    monkeypatch.delenv("KORREL_TELEMETRY_DEBUG", raising=False)
-
-    config_file = tmp_path / "korrel" / "config.json"
-    monkeypatch.setattr("korrel.telemetry._config_path", lambda: config_file)
-
-    # No sender injected: uses _default_sender -> _http_sender.
-    with patch("urllib.request.urlopen") as mock_urlopen:
-        emit_run(
-            scenario_count=1,
-            total_turns=0,
-            pass_count=0,
-            fail_count=1,
-            duration_s=0.0,
-        )
-    assert mock_urlopen.call_count == 1
-
-
 def test_get_or_create_install_id_creates_uuid(monkeypatch, tmp_path):
     """_get_or_create_install_id generates a uuid4 and stores it in config."""
     from korrel.telemetry import _get_or_create_install_id

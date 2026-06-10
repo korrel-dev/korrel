@@ -162,6 +162,8 @@ benchmarks/
     scenario_retail.py   -- Korrel Scenario whose rubric reproduces tau2 reward
     _convert.py          -- tau2 Message <-> korrel canonical Message converters
     _tau2_data.py        -- TAU2_DATA_DIR auto-discovery helper
+    _gen_pass_fixture.py -- generation script for synthetic_task0_pass.run.json;
+                            checked in for regeneration, never imported
     run_fidelity.py      -- offline harness; reads labels.jsonl; writes results.json
     fixtures/
       synthetic_task0.run.json       -- committed; fail fixture (expected 0.0)
@@ -176,9 +178,14 @@ benchmarks/
 
   results/
     .gitkeep
-    results.json   -- written by run_fidelity.py (main benchmark run)
-    summary.md     -- written by run_fidelity.py (main benchmark run)
-    selftest.json  -- written by run_fidelity.py --selftest
+    results.json   -- written by run_fidelity.py (main benchmark run); committed
+                      once the frozen transcripts land
+    summary.md     -- written by run_fidelity.py (main benchmark run); committed
+                      once the frozen transcripts land
+    selftest.json  -- written by run_fidelity.py --selftest; committed
+                      deliberately as the standing evidence until the frozen
+                      transcripts land (reruns overwrite it; diffs should be
+                      empty on an unchanged pin)
 ```
 
 ---
@@ -277,9 +284,11 @@ make benchmark
 ```
 
 `make benchmark` runs `make selftest` first (synthetic fixtures, committed),
-then scores every frozen transcript in `transcripts/retail/` across all four
-legs, writes `results/results.json` and `results/summary.md`, and exits
-nonzero if any transcript fails.
+then recomputes `transcripts/labels.jsonl` from the frozen runs (`make labels`,
+offline and deterministic, so the recompute is a no-op diff on unchanged
+transcripts), then scores every frozen transcript in `transcripts/retail/`
+across all four legs, writes `results/results.json` and `results/summary.md`,
+and exits nonzero if any transcript fails.
 
 If frozen transcripts are not yet present, `make selftest` alone runs the
 harness against the two committed synthetic fixtures:
@@ -294,7 +303,7 @@ make selftest
 Frozen transcripts are not yet committed. The founder generates them once:
 
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...
+export ANTHROPIC_API_KEY=sk-ant-...   # PowerShell: $env:ANTHROPIC_API_KEY = "sk-ant-..."
 cd benchmarks
 make transcripts   # calls tau2 runner; writes transcripts/retail/*.run.json
 make labels        # calls evaluate_simulation offline; writes transcripts/labels.jsonl

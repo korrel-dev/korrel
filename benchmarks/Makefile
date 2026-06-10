@@ -2,8 +2,12 @@
 #
 # Targets:
 #   make benchmark   -- reproducible, no keys, no LLM calls.
-#                       Reads frozen transcripts/retail/*.run.json, scores each,
-#                       runs the fidelity harness, writes results/results.json.
+#                       Runs selftest, recomputes labels, reads frozen
+#                       transcripts/retail/*.run.json, scores each through the
+#                       fidelity harness, writes results/results.json.
+#
+#   make selftest    -- offline, no keys. Runs the four-way fidelity assertion
+#                       against the committed synthetic fixtures only.
 #
 #   make labels      -- recompute transcripts/labels.jsonl from frozen runs.
 #                       Deterministic, offline, no keys.

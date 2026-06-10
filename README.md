@@ -311,7 +311,7 @@ Every run takes a seed and records the model and request parameters. The seed pi
 
 ## Telemetry
 
-Korrel includes opt-in telemetry. No scenario content, persona text, transcripts, prompts, tool schemas, file paths, or model names tied to a customer are ever collected. The event carries only aggregate counters and version metadata.
+Korrel includes opt-in telemetry. On opt-in, `korrel run` sends a single content-scrubbed `run` event to Korrel's collector. No scenario content, persona text, transcripts, prompts, tool schemas, file paths, model names, or keys are ever collected. The event carries only aggregate counters and version metadata.
 
 **What the `run` event sends** (every field, nothing more):
 
@@ -337,7 +337,7 @@ No key, scenario id, path, persona, transcript, prompt, tool schema, or model na
 - Telemetry is automatically off in CI (detected via `CI`, `GITHUB_ACTIONS`, `TRAVIS`, `CIRCLECI`, `GITLAB_CI`, `JENKINS_URL`, `BUILDKITE`, `TF_BUILD`, `TEAMCITY_VERSION`, `BITBUCKET_BUILD_NUMBER`).
 - On the first interactive run outside CI, Korrel prompts once for consent and persists the answer. Declining disables telemetry permanently for that install. Non-interactive sessions default to off with no prompt.
 
-**No endpoint configured means no data sent.** Without `KORREL_TELEMETRY_ENDPOINT` set in the environment, the event is built and dropped. Set `KORREL_TELEMETRY_DEBUG=1` to write the event JSON to stderr for inspection. No endpoint is hardcoded.
+**Where the event goes.** Opted-in events are sent to Korrel's public collector. Set `KORREL_TELEMETRY_ENDPOINT` to redirect them to a self-hosted collector instead. Set `KORREL_TELEMETRY_DEBUG=1` to write the event JSON to stderr for inspection instead of sending it. Sending is best-effort with a 3 second timeout; a failure never affects the run.
 
 Consent and the anonymous install id are stored in `%APPDATA%\korrel\config.json` (Windows) or `$XDG_CONFIG_HOME/korrel/config.json` / `~/.config/korrel/config.json` (Linux/macOS). No key, scenario content, or identifying information is ever written there.
 

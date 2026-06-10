@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "korrel"
-version = "0.1.0"
+version = "0.1.1"
 description = "OSS Python SDK for agent simulation: define a multi-turn agent test once, run it as a pytest CI gate, export it as a verifiers/OpenEnv RL environment."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -56,8 +56,3 @@ packages = ["src/korrel"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-filterwarnings = [
-    # MockTool.schema is part of the public surface (chat-completions tool shape);
-    # the field name intentionally shadows the deprecated BaseModel.schema method.
-    'ignore:Field name "schema".*:UserWarning',
-]

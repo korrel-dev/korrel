@@ -781,12 +781,12 @@ dependencies = [
 ]
 
 [project.scripts]
-server = "{env_name}.server.app:main"
+server = "{env_module}.server.app:main"
 
 [tool.setuptools]
 include-package-data = true
-packages = ["{env_name}", "{env_name}.server"]
-package-dir = {{ "{env_name}" = ".", "{env_name}.server" = "server" }}
+packages = ["{env_module}", "{env_module}.server"]
+package-dir = {{ "{env_module}" = ".", "{env_module}.server" = "server" }}
 '''
 
 _README_MD = '''\
@@ -802,7 +802,7 @@ uvicorn server.app:app --reload --port 8000
 ```
 
 ```python
-from {env_name} import KorrelAction, KorrelEnv
+from {env_module} import KorrelAction, KorrelEnv
 
 with KorrelEnv(base_url="http://localhost:8000") as env:
     result = env.reset()
@@ -824,7 +824,7 @@ file.
 ## Project structure
 
 ```
-{env_name}/
+{env_module}/
     __init__.py
     client.py
     models.py
@@ -834,7 +834,7 @@ file.
     _scenario.py          (bundled Korrel scenario source)
     server/
         __init__.py
-        {env_name}_environment.py
+        {env_module}_environment.py
         app.py
         Dockerfile
         requirements.txt
@@ -985,7 +985,8 @@ def write_openenv_env(
     assert env_module.isidentifier(), (
         f"env_module sanitization produced a non-identifier: {env_module!r}"
     )
-    # env_name is the hyphenated form used in package names and string literals.
+    # env_name is the hyphenated distribution-name form. It is used only for the
+    # PyPI distribution name and prose, never for package/module/import/entry-point paths.
     env_name = env_module.replace("_", "-")
 
     # scenario.id is author-controlled. repr() produces a syntactically valid

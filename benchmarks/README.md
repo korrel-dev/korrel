@@ -1,14 +1,19 @@
 # korrel tau2 fidelity benchmark
 
-**Status: foundations committed; frozen transcripts and results not yet generated.**
+**Status: complete. 80 frozen transcripts (retail tasks 0-39, sonnet + haiku
+agents) pass the four-way fidelity check (korrel CI = verifiers 0.1.14 =
+openenv-core 0.3.0 = tau2 gold) at exact float equality, 0 verdict flips.
+See results/summary.md.**
 
 This artifact proves one claim: a single Korrel scenario definition reproduces
 one tau2-bench reward (its ENV * ACTION * COMMUNICATE evaluator under
 ALL_IGNORE_BASIS, the deterministic subset of tau2's scoring, not its
 basis-respecting leaderboard score; see Caveats) identically across three
 runtimes, korrel pytest CI, verifiers exported environment, and OpenEnv
-exporter, to exact float equality per frozen transcript. The selftest (two committed synthetic fixtures) is the standing
-evidence until the founder runs transcript generation.
+exporter, to exact float equality per frozen transcript. The frozen
+transcripts, their tau2 gold labels, and the four-leg results are committed
+under transcripts/ and results/; the selftest (two committed synthetic
+fixtures) additionally guards the harness on every run.
 
 ---
 
@@ -152,7 +157,7 @@ benchmarks/
   transcripts/
     LICENSE              -- tau2-bench MIT license attribution
     retail/
-      *.run.json         -- FROZEN; committed after founder generation run
+      *.run.json         -- FROZEN; committed
       .gitkeep
     labels.jsonl         -- FROZEN; committed after compute_labels run
 
@@ -181,13 +186,10 @@ benchmarks/
   results/
     .gitkeep
     results.json   -- written by run_fidelity.py (main benchmark run); committed
-                      once the frozen transcripts land
     summary.md     -- written by run_fidelity.py (main benchmark run); committed
-                      once the frozen transcripts land
     selftest.json  -- written by run_fidelity.py --selftest; committed
-                      deliberately as the standing evidence until the frozen
-                      transcripts land (reruns overwrite it; diffs should be
-                      empty on an unchanged pin)
+                      (reruns overwrite it; diffs should be empty on an
+                      unchanged pin)
 ```
 
 ---
@@ -305,7 +307,7 @@ make selftest
 
 ### Keyed regeneration path (founder run; requires ANTHROPIC_API_KEY)
 
-Frozen transcripts are not yet committed. The founder generates them once:
+Frozen transcripts are committed. To regenerate them from scratch (requires a key):
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...   # PowerShell: $env:ANTHROPIC_API_KEY = "sk-ant-..."
@@ -352,12 +354,13 @@ numbers. This is expected and documented here and in `fidelity/run_fidelity.py`.
 
 ### Frozen-transcript status
 
-Frozen transcripts (`transcripts/retail/*.run.json`) and labels
-(`transcripts/labels.jsonl`) are not yet committed. The fidelity table in
-`results/summary.md` is produced by `make benchmark` and will land with the
-frozen transcripts after the founder's generation run. Until then, the
-selftest against the two committed synthetic fixtures is the standing evidence
-that the four-leg harness is correct.
+Frozen transcripts (`transcripts/retail/*.run.json`), labels
+(`transcripts/labels.jsonl`), and results (`results/results.json`,
+`results/summary.md`) are committed. The generation run produced 80
+transcripts (49 gold-pass, 31 gold-fail; total generation cost $17.91);
+all 80 pass the four-way fidelity check with 0 verdict flips. The selftest
+against the two committed synthetic fixtures additionally guards the
+harness on every run.
 
 ### Data provisioning: TAU2_DATA_DIR
 

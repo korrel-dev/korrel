@@ -1,0 +1,214 @@
+{
+  "id": "synthetic-fixture-task0-error",
+  "task_id": "0",
+  "timestamp": "2026-06-10T13:16:45.874625",
+  "start_time": "1970-01-01T00:00:00",
+  "end_time": "1970-01-01T00:00:01",
+  "duration": 1.0,
+  "termination_reason": "unexpected_error",
+  "agent_cost": null,
+  "user_cost": null,
+  "reward_info": null,
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are a retail support agent.",
+      "turn_idx": null,
+      "timestamp": "2026-06-10T13:16:45.874497"
+    },
+    {
+      "role": "user",
+      "content": "I need help with an exchange.",
+      "tool_calls": null,
+      "is_audio": false,
+      "turn_idx": null,
+      "timestamp": "2026-06-10T13:16:45.874526",
+      "cost": null,
+      "usage": null,
+      "raw_data": null,
+      "generation_time_seconds": null,
+      "audio_format": null,
+      "audio_path": null,
+      "audio_script_gold": null,
+      "speech_effects": null,
+      "source_effects": null,
+      "channel_effects": null,
+      "turn_taking_action": null,
+      "utterance_ids": null,
+      "chunk_id": null,
+      "is_final_chunk": true,
+      "source": null,
+      "contains_speech": true
+    },
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "tc_001",
+          "name": "find_user_id_by_name_zip",
+          "arguments": {
+            "first_name": "Yusuf",
+            "last_name": "Rossi",
+            "zip": "19122"
+          },
+          "requestor": "assistant"
+        }
+      ],
+      "is_audio": false,
+      "turn_idx": null,
+      "timestamp": "2026-06-10T13:16:45.874550",
+      "cost": null,
+      "usage": null,
+      "raw_data": null,
+      "generation_time_seconds": null,
+      "audio_format": null,
+      "audio_path": null,
+      "audio_script_gold": null,
+      "speech_effects": null,
+      "source_effects": null,
+      "channel_effects": null,
+      "turn_taking_action": null,
+      "utterance_ids": null,
+      "chunk_id": null,
+      "is_final_chunk": true,
+      "source": null,
+      "contains_speech": true
+    },
+    {
+      "id": "tc_001",
+      "role": "tool",
+      "content": "usr_yusuf_001",
+      "requestor": "assistant",
+      "error": false,
+      "turn_idx": null,
+      "timestamp": "2026-06-10T13:16:45.874568"
+    },
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "tc_002",
+          "name": "get_product_details",
+          "arguments": {
+            "product_id": "1656367028"
+          },
+          "requestor": "assistant"
+        },
+        {
+          "id": "tc_003",
+          "name": "get_product_details",
+          "arguments": {
+            "product_id": "4896585277"
+          },
+          "requestor": "assistant"
+        }
+      ],
+      "is_audio": false,
+      "turn_idx": null,
+      "timestamp": "2026-06-10T13:16:45.874575",
+      "cost": null,
+      "usage": null,
+      "raw_data": null,
+      "generation_time_seconds": null,
+      "audio_format": null,
+      "audio_path": null,
+      "audio_script_gold": null,
+      "speech_effects": null,
+      "source_effects": null,
+      "channel_effects": null,
+      "turn_taking_action": null,
+      "utterance_ids": null,
+      "chunk_id": null,
+      "is_final_chunk": true,
+      "source": null,
+      "contains_speech": true
+    },
+    {
+      "role": "tool",
+      "tool_messages": [
+        {
+          "id": "tc_002",
+          "role": "tool",
+          "content": "{\"product_id\":\"1656367028\",\"name\":\"Keyboard\"}",
+          "requestor": "assistant",
+          "error": false,
+          "turn_idx": null,
+          "timestamp": "2026-06-10T13:16:45.874582"
+        },
+        {
+          "id": "tc_003",
+          "role": "tool",
+          "content": "{\"product_id\":\"4896585277\",\"name\":\"Thermostat\"}",
+          "requestor": "assistant",
+          "error": false,
+          "turn_idx": null,
+          "timestamp": "2026-06-10T13:16:45.874588"
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": "I encountered an error and cannot complete the request.",
+      "tool_calls": null,
+      "is_audio": false,
+      "turn_idx": null,
+      "timestamp": "2026-06-10T13:16:45.874598",
+      "cost": null,
+      "usage": null,
+      "raw_data": null,
+      "generation_time_seconds": null,
+      "audio_format": null,
+      "audio_path": null,
+      "audio_script_gold": null,
+      "speech_effects": null,
+      "source_effects": null,
+      "channel_effects": null,
+      "turn_taking_action": null,
+      "utterance_ids": null,
+      "chunk_id": null,
+      "is_final_chunk": true,
+      "source": null,
+      "contains_speech": true
+    },
+    {
+      "role": "user",
+      "content": "OK, thanks anyway.",
+      "tool_calls": null,
+      "is_audio": false,
+      "turn_idx": null,
+      "timestamp": "2026-06-10T13:16:45.874604",
+      "cost": null,
+      "usage": null,
+      "raw_data": null,
+      "generation_time_seconds": null,
+      "audio_format": null,
+      "audio_path": null,
+      "audio_script_gold": null,
+      "speech_effects": null,
+      "source_effects": null,
+      "channel_effects": null,
+      "turn_taking_action": null,
+      "utterance_ids": null,
+      "chunk_id": null,
+      "is_final_chunk": true,
+      "source": null,
+      "contains_speech": true
+    }
+  ],
+  "ticks": null,
+  "trial": null,
+  "seed": 300,
+  "mode": "half_duplex",
+  "speech_environment": null,
+  "review": null,
+  "user_only_review": null,
+  "info": null,
+  "auth_classification": null,
+  "hallucination_retries_used": 0,
+  "hallucination_check": null,
+  "provider_session_id": null,
+  "policy": null,
+  "effect_timeline": null
+}

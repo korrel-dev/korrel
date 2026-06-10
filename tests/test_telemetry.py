@@ -9,12 +9,14 @@ from unittest.mock import patch
 import pytest
 
 from korrel.telemetry import (
+    _DEFAULT_TELEMETRY_ENDPOINT,
     _ci_detected,
     _config_path,
     _is_falsey,
     _is_truthy,
     _load_config,
     _resolve_consent,
+    _resolve_endpoint,
     build_run_event,
     emit_run,
 )
@@ -446,26 +448,6 @@ def test_emit_run_undecided_non_interactive_no_send(monkeypatch):
     assert events == []
 
 
-def test_emit_run_no_endpoint_default_sender_does_not_raise(monkeypatch):
-    """With consent=True but no endpoint set, _http_sender drops silently."""
-    monkeypatch.setenv("KORREL_TELEMETRY", "1")
-    monkeypatch.delenv("DO_NOT_TRACK", raising=False)
-    monkeypatch.delenv("CI", raising=False)
-    monkeypatch.delenv("KORREL_TELEMETRY_ENDPOINT", raising=False)
-    monkeypatch.delenv("KORREL_TELEMETRY_DEBUG", raising=False)
-
-    # No sender injected: uses _default_sender -> _http_sender which drops.
-    emit_run(
-        scenario_count=1,
-        total_turns=0,
-        pass_count=0,
-        fail_count=1,
-        duration_s=0.0,
-    )
-    # No assertion needed beyond "did not raise"; the test verifies the
-    # default sender path is exercised without network or exception.
-
-
 def test_get_or_create_install_id_creates_uuid(monkeypatch, tmp_path):
     """_get_or_create_install_id generates a uuid4 and stores it in config."""
     from korrel.telemetry import _get_or_create_install_id
@@ -558,15 +540,17 @@ def test_emit_run_event_install_id_is_string(monkeypatch, tmp_path):
     assert len(install_id) > 0
 
 
-def test_http_sender_no_endpoint_does_not_raise(monkeypatch):
-    """_http_sender must return without raising when no endpoint is set."""
+def test_http_sender_unset_endpoint_posts_to_default(monkeypatch):
+    """_http_sender falls back to the default collector when no override is set."""
     monkeypatch.delenv("KORREL_TELEMETRY_ENDPOINT", raising=False)
     from korrel.telemetry import _http_sender
     event = build_run_event(
         scenario_count=1, total_turns=0, pass_count=0, fail_count=0,
         duration_s=0.0, install_id="no-endpoint",
     )
-    _http_sender(event)  # Must not raise.
+    with patch("urllib.request.urlopen") as mock_urlopen:
+        _http_sender(event)  # Must not raise.
+    assert mock_urlopen.call_args.args[0].full_url == _DEFAULT_TELEMETRY_ENDPOINT
 
 
 @pytest.mark.parametrize("korrel_telemetry_val,do_not_track,ci_val,expected", [
@@ -613,3 +597,116 @@ def test_config_file_never_contains_key_or_secret(monkeypatch, tmp_path):
         raw = config_file.read_text(encoding="utf-8").lower()
         for forbidden in ("anthropic_api_key", "openai_api_key", "secret", "password", "token"):
             assert forbidden not in raw
+
+
+# ---------------------------------------------------------------------------
+# Endpoint resolution and the default collector
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_endpoint_default_when_env_unset(monkeypatch):
+    monkeypatch.delenv("KORREL_TELEMETRY_ENDPOINT", raising=False)
+    assert _resolve_endpoint() == _DEFAULT_TELEMETRY_ENDPOINT
+
+
+def test_resolve_endpoint_env_override(monkeypatch):
+    monkeypatch.setenv("KORREL_TELEMETRY_ENDPOINT", "https://collector.example/v1/t")
+    assert _resolve_endpoint() == "https://collector.example/v1/t"
+
+
+def test_resolve_endpoint_blank_env_falls_back_to_default(monkeypatch):
+    monkeypatch.setenv("KORREL_TELEMETRY_ENDPOINT", "   ")
+    assert _resolve_endpoint() == _DEFAULT_TELEMETRY_ENDPOINT
+
+
+@pytest.mark.parametrize("optout_var,optout_val", [
+    ("KORREL_TELEMETRY", "0"),
+    ("DO_NOT_TRACK", "1"),
+    ("CI", "true"),
+])
+def test_emit_run_defaulted_endpoint_sends_nothing_without_consent(
+    monkeypatch, tmp_path, optout_var, optout_val
+):
+    """Privacy regression: with the endpoint now defaulted, each opt-out path
+    independently keeps emit_run off the network entirely."""
+    _clean_env(monkeypatch)
+    monkeypatch.setenv(optout_var, optout_val)
+    config_file = tmp_path / "korrel" / "config.json"
+    monkeypatch.setattr("korrel.telemetry._config_path", lambda: config_file)
+
+    with patch("urllib.request.urlopen") as mock_urlopen:
+        emit_run(
+            scenario_count=1,
+            total_turns=1,
+            pass_count=1,
+            fail_count=0,
+            duration_s=0.1,
+        )
+    mock_urlopen.assert_not_called()
+
+
+def test_emit_run_consent_on_posts_to_default_endpoint(monkeypatch, tmp_path):
+    """With consent on and no override, emit_run POSTs JSON to the default
+    collector with Content-Type application/json and no other headers."""
+    _clean_env(monkeypatch)
+    monkeypatch.setenv("KORREL_TELEMETRY", "1")
+    config_file = tmp_path / "korrel" / "config.json"
+    monkeypatch.setattr("korrel.telemetry._config_path", lambda: config_file)
+
+    with patch("urllib.request.urlopen") as mock_urlopen:
+        emit_run(
+            scenario_count=1,
+            total_turns=2,
+            pass_count=1,
+            fail_count=0,
+            duration_s=0.5,
+        )
+
+    assert mock_urlopen.call_count == 1
+    req = mock_urlopen.call_args.args[0]
+    assert req.full_url == _DEFAULT_TELEMETRY_ENDPOINT
+    assert req.get_method() == "POST"
+    headers = {k.lower(): v for k, v in req.headers.items()}
+    assert headers == {"content-type": "application/json"}
+    assert mock_urlopen.call_args.kwargs.get("timeout") == 3
+    body = json.loads(req.data.decode("utf-8"))
+    assert body["event"] == "run"
+
+
+def test_emit_run_consent_on_posts_to_override_endpoint(monkeypatch, tmp_path):
+    """KORREL_TELEMETRY_ENDPOINT redirects the POST to the override URL."""
+    _clean_env(monkeypatch)
+    monkeypatch.setenv("KORREL_TELEMETRY", "1")
+    monkeypatch.setenv("KORREL_TELEMETRY_ENDPOINT", "https://collector.example/v1/t")
+    config_file = tmp_path / "korrel" / "config.json"
+    monkeypatch.setattr("korrel.telemetry._config_path", lambda: config_file)
+
+    with patch("urllib.request.urlopen") as mock_urlopen:
+        emit_run(
+            scenario_count=1,
+            total_turns=1,
+            pass_count=0,
+            fail_count=1,
+            duration_s=0.1,
+        )
+
+    assert mock_urlopen.call_count == 1
+    assert mock_urlopen.call_args.args[0].full_url == "https://collector.example/v1/t"
+
+
+def test_emit_run_urlopen_exception_is_swallowed(monkeypatch, tmp_path):
+    """A urlopen failure never raises into the run path."""
+    _clean_env(monkeypatch)
+    monkeypatch.setenv("KORREL_TELEMETRY", "1")
+    config_file = tmp_path / "korrel" / "config.json"
+    monkeypatch.setattr("korrel.telemetry._config_path", lambda: config_file)
+
+    with patch("urllib.request.urlopen", side_effect=OSError("connection refused")):
+        emit_run(
+            scenario_count=1,
+            total_turns=0,
+            pass_count=0,
+            fail_count=1,
+            duration_s=0.0,
+        )
+    # Reaching this line means the exception was swallowed.

@@ -228,14 +228,27 @@ def build_run_event(
 # The default sender uses urllib.request. Tests inject a recording sender.
 Sender = Callable[[dict[str, Any]], None]
 
+# The public, unauthenticated, content-free collector (per the cloud
+# collector design). KORREL_TELEMETRY_ENDPOINT overrides it for
+# self-hosting.
+_DEFAULT_TELEMETRY_ENDPOINT = (
+    "https://tsbvccnafjkqgizbbdwy.supabase.co/functions/v1/telemetry"
+)
+
+
+def _resolve_endpoint() -> str:
+    """Return the collector URL: the env override if set, else the default."""
+    return (
+        os.environ.get("KORREL_TELEMETRY_ENDPOINT", "").strip()
+        or _DEFAULT_TELEMETRY_ENDPOINT
+    )
+
 
 def _http_sender(event: dict[str, Any]) -> None:
-    """POST the event JSON to KORREL_TELEMETRY_ENDPOINT if set."""
+    """POST the event JSON to the resolved telemetry endpoint."""
     import urllib.request
 
-    endpoint = os.environ.get("KORREL_TELEMETRY_ENDPOINT", "")
-    if not endpoint:
-        return
+    endpoint = _resolve_endpoint()
     try:
         payload = json.dumps(event).encode("utf-8")
         req = urllib.request.Request(
@@ -259,7 +272,8 @@ def _debug_sender(event: dict[str, Any]) -> None:
 
 
 def _default_sender(event: dict[str, Any]) -> None:
-    """Drop the event unless an endpoint or debug flag is set."""
+    """POST the event to the resolved collector, or write it to stderr
+    when KORREL_TELEMETRY_DEBUG is set."""
     if os.environ.get("KORREL_TELEMETRY_DEBUG", ""):
         _debug_sender(event)
     else:

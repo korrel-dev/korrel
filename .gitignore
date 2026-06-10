@@ -29,3 +29,8 @@ Thumbs.db
 
 # korrel run and pytest-plugin transcript output
 .korrel/
+
+# Claude Code per-machine files (untracked by design; ignored so GUI git
+# clients never stash or discard them on branch switches)
+CLAUDE.md
+.claude/

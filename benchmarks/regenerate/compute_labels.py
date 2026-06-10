@@ -78,7 +78,10 @@ def main() -> None:
 
     for path in run_files:
         # Filename pattern: <task_id>__<model-slug>.run.json
-        stem = path.stem  # e.g. "0__sonnet"
+        # path.stem strips only ".json" and would leave a stray ".run" on the
+        # slug (and the harness appends ".run.json" when resolving it back),
+        # so strip the full double suffix explicitly.
+        stem = path.name.removesuffix(".run.json")  # e.g. "0__sonnet"
         parts = stem.split("__", 1)
         if len(parts) != 2:
             print(

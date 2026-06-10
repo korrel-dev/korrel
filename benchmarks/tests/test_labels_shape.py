@@ -219,6 +219,23 @@ def test_stem_parsing_preserves_model_slug_with_multiple_double_underscores() ->
 
 
 # ---------------------------------------------------------------------------
+# Run slug derivation from the transcript filename
+# ---------------------------------------------------------------------------
+
+
+def _slug_from_filename(name: str) -> str:
+    """Replicate compute_labels slug derivation: strip the full .run.json suffix."""
+    return name.removesuffix(".run.json")
+
+
+def test_slug_strips_full_double_suffix() -> None:
+    """Path.stem would leave "0__sonnet.run"; the harness resolves the slug back
+    to "<slug>.run.json", so the slug must be the bare "<task_id>__<model>"."""
+    assert _slug_from_filename("0__sonnet.run.json") == "0__sonnet"
+    assert _parse_stem(_slug_from_filename("39__haiku.run.json")) == ("39", "haiku")
+
+
+# ---------------------------------------------------------------------------
 # JSONL line format
 # ---------------------------------------------------------------------------
 

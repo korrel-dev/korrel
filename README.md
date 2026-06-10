@@ -14,7 +14,7 @@ Inside a uv project, add it as a dependency instead:
 uv add korrel
 ```
 
-Bring your own provider keys. Korrel reads keys from the environment at call time and stores none. The default provider is Claude via the `anthropic` SDK; set `ANTHROPIC_API_KEY`. OpenAI support is an optional extra (`korrel[openai]`).
+Bring your own provider keys. Korrel reads keys from the environment at call time and stores none. The default provider is Claude via the `anthropic` SDK; set `ANTHROPIC_API_KEY`. The default model is `claude-sonnet-4-6` for both the agent provider and the `Persona`; override it with `AnthropicProvider(model=...)` and `Persona(..., model=...)`. OpenAI support is an optional extra (`korrel[openai]`).
 
 ## Quickstart
 
@@ -212,6 +212,14 @@ Install the package in a Python 3.10-3.13 environment and load it:
 import verifiers as vf
 
 env = vf.load_environment("support_refund")
+```
+
+`vf.load_environment` resolves through the verifiers registry, which requires the full `verifiers[all]` install. The generated `support_refund.py` also exposes `load_environment()` directly, which loads under the base `verifiers` install:
+
+```python
+from support_refund import load_environment
+
+env = load_environment()
 ```
 
 When `--out` is omitted, the package is written to `.korrel/export/<scenario-id>/`.

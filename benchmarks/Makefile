@@ -24,11 +24,18 @@
 UV ?= uv
 PYTHON = $(UV) run --project . python
 
-.PHONY: benchmark labels transcripts sync
+.PHONY: benchmark labels transcripts sync selftest
+
+# --- selftest: offline, no keys, synthetic fixture only -----------------------
+
+selftest: sync
+	@echo "--- running selftest (synthetic fixture, no frozen transcripts needed) ---"
+	$(PYTHON) fidelity/run_fidelity.py --selftest
 
 # --- primary target: offline, no keys ------------------------------------------
+# Runs selftest as a pre-step before the frozen-transcript benchmark.
 
-benchmark: sync labels
+benchmark: selftest labels
 	@echo "--- running fidelity harness ---"
 	$(PYTHON) fidelity/run_fidelity.py
 

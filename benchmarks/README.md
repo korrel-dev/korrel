@@ -370,7 +370,7 @@ stated capabilities; it does not score or rank them.
 | Coval (https://www.coval.ai) | Voice agent evaluation and production monitoring platform; simulation, benchmarking, and real-time observability for voice AI across the deployment lifecycle; closed commercial SaaS, so results produced on its platform cannot be independently reproduced outside it. |
 | Braintrust (https://www.braintrust.dev) | Tracing, logging, and evaluation platform for LLM applications; captures execution traces, supports experiments comparing model versions and prompt variants, and provides a CLI (`bt`) for repeatable evaluation workflows. |
 | tau2-bench (https://github.com/sierra-research/tau2-bench) | Multi-domain agent benchmark with retail, airline, banking, and telco domains; structured task definitions, gold evaluator (`evaluate_simulation`), and split-based task organization; MIT licensed; this artifact builds on it directly. |
-| Korrel (https://github.com/sierra-research/tau2-bench) | Define a multi-turn agent test once (scenario, persona, mock tools, rubric); run it as a pytest CI gate today and export it as a verifiers or OpenEnv RL environment when ready; this artifact is the fidelity proof for that claim. |
+| Korrel (see the repository README at `../README.md`) | Define a multi-turn agent test once (scenario, persona, mock tools, rubric); run it as a pytest CI gate today and export it as a verifiers or OpenEnv RL environment when ready; this artifact is the fidelity proof for that claim. |
 
 ---
 

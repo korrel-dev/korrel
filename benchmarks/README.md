@@ -3,9 +3,11 @@
 **Status: foundations committed; frozen transcripts and results not yet generated.**
 
 This artifact proves one claim: a single Korrel scenario definition reproduces
-tau2-bench's gold reward across three runtimes, korrel pytest CI, verifiers
-exported environment, and OpenEnv exporter, to exact float equality per frozen
-transcript. The selftest (two committed synthetic fixtures) is the standing
+one tau2-bench reward (its ENV * ACTION * COMMUNICATE evaluator under
+ALL_IGNORE_BASIS, the deterministic subset of tau2's scoring, not its
+basis-respecting leaderboard score; see Caveats) identically across three
+runtimes, korrel pytest CI, verifiers exported environment, and OpenEnv
+exporter, to exact float equality per frozen transcript. The selftest (two committed synthetic fixtures) is the standing
 evidence until the founder runs transcript generation.
 
 ---

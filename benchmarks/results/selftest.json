@@ -1,0 +1,58 @@
+{
+  "fixtures": [
+    "synthetic_task0.run.json",
+    "synthetic_task0_pass.run.json"
+  ],
+  "korrel_version": "0.1.0",
+  "mode": "selftest",
+  "n_reruns_stability": 20,
+  "openenv_core_version": "0.3.0",
+  "python_version": "3.13.13",
+  "results": [
+    {
+      "domain": "retail",
+      "eq_all_four": true,
+      "eq_korrel_gold": true,
+      "eq_openenv_korrel": true,
+      "eq_verifiers_korrel": true,
+      "error": null,
+      "flip_count": 0,
+      "gold_reward": 0.0,
+      "korrel_reward": 0.0,
+      "model": "synthetic",
+      "openenv_reward": 0.0,
+      "passed": true,
+      "round_trip_tau2_korrel_tau2": true,
+      "round_trip_verifiers": true,
+      "run": "synthetic_task0",
+      "task_id": "0",
+      "verifiers_reward": 0.0
+    },
+    {
+      "domain": "retail",
+      "eq_all_four": true,
+      "eq_korrel_gold": true,
+      "eq_openenv_korrel": true,
+      "eq_verifiers_korrel": true,
+      "error": null,
+      "flip_count": 0,
+      "gold_reward": 1.0,
+      "korrel_reward": 1.0,
+      "model": "synthetic",
+      "openenv_reward": 1.0,
+      "passed": true,
+      "round_trip_tau2_korrel_tau2": true,
+      "round_trip_verifiers": true,
+      "run": "synthetic_task0_pass",
+      "task_id": "0",
+      "verifiers_reward": 1.0
+    }
+  ],
+  "selftest_passed": true,
+  "tau2_pin": {
+    "published": "2026-03-18",
+    "sha": "17e07b1da2bbc0cadfddeea36412686e0604127b",
+    "tag": "v1.0.0"
+  },
+  "verifiers_version": "0.1.14"
+}

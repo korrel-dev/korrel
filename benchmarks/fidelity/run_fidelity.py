@@ -80,8 +80,10 @@ RESULTS_DIR = BENCHMARKS_DIR / "results"
 RESULTS_JSON = RESULTS_DIR / "results.json"
 SUMMARY_MD = RESULTS_DIR / "summary.md"
 
-# Selftest fixture
+# Selftest fixtures: the fail fixture exercises the 0.0 path; the pass fixture
+# exercises the 1.0 path and proves the harness distinguishes them.
 SELFTEST_FIXTURE = FIXTURES_DIR / "synthetic_task0.run.json"
+SELFTEST_PASS_FIXTURE = FIXTURES_DIR / "synthetic_task0_pass.run.json"
 
 # Tolerance: exact float equality (no relaxation; if this fails, stop and report)
 REL_TOL = 1e-9
@@ -498,19 +500,123 @@ def _korrel_version() -> str:
         return "unknown"
 
 
+def _selftest_one_fixture(
+    fixture_path: Path,
+    run_slug: str,
+    expected_gold_reward: float,
+    scenario: Any,
+    SimulationRun: Any,
+) -> tuple[dict[str, Any], list[str]]:
+    """Score one selftest fixture and return (result, failures).
+
+    fixture_path:
+        Path to the fixture JSON file.
+    run_slug:
+        Short identifier used in failure messages.
+    expected_gold_reward:
+        The expected reward for all four legs.
+    scenario:
+        The korrel Scenario object.
+    SimulationRun:
+        tau2 SimulationRun class (imported by the caller).
+    """
+    print(f"selftest: loading fixture {fixture_path.name}")
+    with open(fixture_path, encoding="utf-8") as f:
+        raw = json.load(f)
+    simulation = SimulationRun.model_validate(raw)
+    print(f"  task_id={simulation.task_id}, messages={len(simulation.messages)}")
+    print(f"  termination_reason={simulation.termination_reason.value}")
+
+    label: dict[str, Any] = {
+        "task_id": simulation.task_id,
+        "run": run_slug,
+        "model": "synthetic",
+        "domain": "retail",
+        "gold_reward": expected_gold_reward,
+        "gold_pass": expected_gold_reward >= scenario.rubric.pass_threshold,
+    }
+
+    print(f"  scoring with N={N_RERUNS} stability reruns...")
+    result = _score_transcript(scenario, simulation, label)
+
+    failures: list[str] = []
+
+    # All four legs must equal expected_gold_reward.
+    for leg, key in [
+        ("korrel CI", "korrel_reward"),
+        ("verifiers", "verifiers_reward"),
+        ("openenv", "openenv_reward"),
+        ("tau2 gold", "gold_reward"),
+    ]:
+        val = result[key]
+        if val != expected_gold_reward:
+            failures.append(
+                f"[{run_slug}] {leg} reward expected {expected_gold_reward!r}, got {val!r}"
+            )
+        else:
+            print(f"  {leg}: {val} (ok)")
+
+    if not result["eq_all_four"]:
+        k = result["korrel_reward"]
+        vr = result["verifiers_reward"]
+        oe = result["openenv_reward"]
+        g = result["gold_reward"]
+        failures.append(
+            f"[{run_slug}] four-way equality failed: "
+            f"korrel={k}, verifiers={vr}, openenv={oe}, gold={g}"
+        )
+    else:
+        print("  four-way equality: ok")
+
+    if not result["round_trip_verifiers"]:
+        failures.append(f"[{run_slug}] verifiers round-trip assertion failed")
+    else:
+        print("  verifiers round-trip: ok")
+
+    if not result["round_trip_tau2_korrel_tau2"]:
+        failures.append(f"[{run_slug}] tau2->korrel->tau2 round-trip assertion failed")
+    else:
+        print("  tau2 round-trip: ok")
+
+    if result["flip_count"] > 0:
+        fc = result["flip_count"]
+        failures.append(
+            f"[{run_slug}] stability: {fc} verdict flips over {N_RERUNS} reruns"
+        )
+    else:
+        print(f"  stability: 0 flips over {N_RERUNS} reruns (ok)")
+
+    if result["error"]:
+        err = result["error"]
+        failures.append(f"[{run_slug}] errors: {err}")
+
+    return result, failures
+
+
 def run_selftest() -> None:
-    """Run the four-way assertion against the committed synthetic fixture.
+    """Run the four-way assertion against both committed synthetic fixtures.
 
-    The fixture is benchmarks/fidelity/fixtures/synthetic_task0.run.json.
-    It carries termination_reason=unexpected_error so the tau2 evaluator
-    returns 0.0 deterministically, exercising all conversion paths with no
-    DB access for the env check and no LLM calls.
+    Fixtures:
+      synthetic_task0.run.json -- termination_reason=unexpected_error,
+        expected reward 0.0 on all four legs.  Exercises the 0.0 path and
+        all conversion helpers with no DB side effects.
+      synthetic_task0_pass.run.json -- termination_reason=agent_stop,
+        all 5 gold actions with correct arguments and exact tool responses,
+        expected reward 1.0 on all four legs.  Proves the harness
+        distinguishes passing from failing, and exercises the ENV and
+        ACTION evaluator paths.
 
-    Asserts:
-    - All four legs return exactly 0.0.
-    - verifiers round-trip: _to_korrel_messages(dicts) reproduces canonical messages.
+    For each fixture:
+    - Four-way equality: all four legs must equal the expected reward.
+    - verifiers round-trip: _to_korrel_messages(dicts) reproduces canonical
+      messages.
     - tau2 round-trip: tau2->korrel->tau2 preserves evaluator-relevant fields.
-    - 0 verdict flips over N=20 reruns.
+    - Stability: 0 verdict flips over N=20 reruns.
+
+    Additional check:
+    - The pass fixture agreed value must be > 0 (fail otherwise, with a
+      clear message).  This guards against a broken leg that always returns
+      0.0, which would pass four-way equality at 0.0.
 
     Exits nonzero on any assertion failure.
     """
@@ -520,109 +626,85 @@ def run_selftest() -> None:
     except ImportError as exc:
         print(
             f"ERROR: import failed ({exc}). "
-            "Ensure the benchmarks environment is synced: `make sync`.",
+            "Ensure the benchmarks environment is synced: make sync.",
             file=sys.stderr,
         )
         sys.exit(1)
 
-    if not SELFTEST_FIXTURE.exists():
-        print(
-            f"ERROR: selftest fixture not found: {SELFTEST_FIXTURE}",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+    for fixture_path in [SELFTEST_FIXTURE, SELFTEST_PASS_FIXTURE]:
+        if not fixture_path.exists():
+            print(
+                f"ERROR: selftest fixture not found: {fixture_path}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
-    print(f"selftest: loading fixture {SELFTEST_FIXTURE.name}")
-    with open(SELFTEST_FIXTURE, encoding="utf-8") as f:
-        raw = json.load(f)
-    simulation = SimulationRun.model_validate(raw)
-    print(f"  task_id={simulation.task_id}, messages={len(simulation.messages)}")
-    print(f"  termination_reason={simulation.termination_reason.value}")
+    all_failures: list[str] = []
+    all_results: list[dict[str, Any]] = []
 
-    label: dict[str, Any] = {
-        "task_id": simulation.task_id,
-        "run": "synthetic_task0",
-        "model": "synthetic",
-        "domain": "retail",
-        "gold_reward": 0.0,
-        "gold_pass": False,
-    }
+    print()
+    print("--- fixture 1/2: fail path (expected 0.0) ---")
+    result0, failures0 = _selftest_one_fixture(
+        fixture_path=SELFTEST_FIXTURE,
+        run_slug="synthetic_task0",
+        expected_gold_reward=0.0,
+        scenario=scenario,
+        SimulationRun=SimulationRun,
+    )
+    all_results.append(result0)
+    all_failures.extend(failures0)
 
-    print(f"  scoring with N={N_RERUNS} stability reruns...")
-    result = _score_transcript(scenario, simulation, label)
+    print()
+    print("--- fixture 2/2: pass path (expected 1.0) ---")
+    result1, failures1 = _selftest_one_fixture(
+        fixture_path=SELFTEST_PASS_FIXTURE,
+        run_slug="synthetic_task0_pass",
+        expected_gold_reward=1.0,
+        scenario=scenario,
+        SimulationRun=SimulationRun,
+    )
+    all_results.append(result1)
+    all_failures.extend(failures1)
 
-    failures: list[str] = []
-
-    # All four legs must be 0.0
-    for leg, key in [
-        ("korrel CI", "korrel_reward"),
-        ("verifiers", "verifiers_reward"),
-        ("openenv", "openenv_reward"),
-        ("tau2 gold", "gold_reward"),
-    ]:
-        val = result[key]
-        if val != 0.0:
-            failures.append(f"{leg} reward expected 0.0, got {val!r}")
-        else:
-            print(f"  {leg}: {val} (ok)")
-
-    if not result["eq_all_four"]:
-        failures.append(
-            f"four-way equality failed: "
-            f"korrel={result['korrel_reward']}, "
-            f"verifiers={result['verifiers_reward']}, "
-            f"openenv={result['openenv_reward']}, "
-            f"gold={result['gold_reward']}"
+    # Additional guard: pass fixture agreed value must be > 0.
+    pass_agreed = result1.get("korrel_reward")
+    if pass_agreed is None or pass_agreed <= 0.0:
+        all_failures.append(
+            f"pass fixture agreed reward is {pass_agreed!r}; "
+            "a broken leg returning 0.0 always would pass four-way equality "
+            "at 0.0 -- the pass fixture must score > 0 to guard against this"
         )
     else:
-        print("  four-way equality: ok")
+        print(f"\npass fixture guard: agreed reward = {pass_agreed} > 0 (ok)")
 
-    if not result["round_trip_verifiers"]:
-        failures.append("verifiers round-trip assertion failed")
-    else:
-        print("  verifiers round-trip: ok")
-
-    if not result["round_trip_tau2_korrel_tau2"]:
-        failures.append("tau2->korrel->tau2 round-trip assertion failed")
-    else:
-        print("  tau2 round-trip: ok")
-
-    if result["flip_count"] > 0:
-        failures.append(
-            f"stability: {result['flip_count']} verdict flips over {N_RERUNS} reruns"
-        )
-    else:
-        print(f"  stability: 0 flips over {N_RERUNS} reruns (ok)")
-
-    if result["error"]:
-        failures.append(f"errors: {result['error']}")
-
-    # Write selftest results
+    # Write selftest results.
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     selftest_output: dict[str, Any] = {
         "mode": "selftest",
-        "fixture": SELFTEST_FIXTURE.name,
+        "fixtures": [SELFTEST_FIXTURE.name, SELFTEST_PASS_FIXTURE.name],
         "tau2_pin": TAU2_PIN,
         "verifiers_version": "0.1.14",
         "openenv_core_version": "0.3.0",
         "korrel_version": _korrel_version(),
         "python_version": platform.python_version(),
         "n_reruns_stability": N_RERUNS,
-        "result": result,
-        "selftest_passed": len(failures) == 0,
+        "results": all_results,
+        "selftest_passed": len(all_failures) == 0,
     }
     selftest_json = RESULTS_DIR / "selftest.json"
     with open(selftest_json, "w", encoding="utf-8") as f:
         json.dump(selftest_output, f, indent=2, sort_keys=True)
     print(f"\nselftest results written to {selftest_json}")
 
-    if failures:
-        print(f"\nSELFTEST FAIL ({len(failures)} failures):", file=sys.stderr)
-        for msg in failures:
+    if all_failures:
+        print(f"\nSELFTEST FAIL ({len(all_failures)} failures):", file=sys.stderr)
+        for msg in all_failures:
             print(f"  - {msg}", file=sys.stderr)
         sys.exit(1)
     else:
-        print("\nSELFTEST PASS: synthetic fixture reproduces 0.0 on all four legs.")
+        print(
+            "\nSELFTEST PASS: both fixtures pass all four-way fidelity checks."
+        )
 
 
 # ---------------------------------------------------------------------------

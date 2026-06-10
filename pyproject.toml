@@ -10,6 +10,22 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
 authors = [{ name = "korrel-dev" }]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Testing",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+keywords = [
+    "agent", "evaluation", "simulation", "llm",
+    "reinforcement-learning", "pytest", "verifiers", "openenv",
+]
 dependencies = [
     "pydantic>=2,<3",
     "anthropic",
@@ -27,7 +43,10 @@ korrel = "korrel.cli:main"
 korrel = "korrel.pytest_plugin"
 
 [project.urls]
-Homepage = "https://github.com/korrel-dev/korrel"
+Homepage = "https://korrel.dev"
+Repository = "https://github.com/korrel-dev/korrel"
+Documentation = "https://github.com/korrel-dev/korrel#readme"
+Issues = "https://github.com/korrel-dev/korrel/issues"
 
 [dependency-groups]
 dev = ["pytest"]

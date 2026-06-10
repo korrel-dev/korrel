@@ -5,6 +5,12 @@ OSS Python SDK for agent simulation. Define a multi-turn agent test once, run it
 ## Install
 
 ```
+pip install korrel
+```
+
+Inside a uv project, add it as a dependency instead:
+
+```
 uv add korrel
 ```
 

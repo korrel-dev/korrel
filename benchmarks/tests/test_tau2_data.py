@@ -88,17 +88,8 @@ def test_find_tau2_data_dir_raises_when_env_var_points_to_nonexistent_path(
     """TAU2_DATA_DIR set to a path that does not exist -> RuntimeError."""
     nonexistent = str(tmp_path / "does_not_exist")
     with patch.dict(os.environ, {"TAU2_DATA_DIR": nonexistent}, clear=False):
-        # Temporarily remove the real value if present so it doesn't mask the fake
-        saved = os.environ.pop("TAU2_DATA_DIR", None)
-        os.environ["TAU2_DATA_DIR"] = nonexistent
-        try:
-            with pytest.raises(RuntimeError, match="TAU2_DATA_DIR"):
-                find_tau2_data_dir()
-        finally:
-            if saved is not None:
-                os.environ["TAU2_DATA_DIR"] = saved
-            else:
-                os.environ.pop("TAU2_DATA_DIR", None)
+        with pytest.raises(RuntimeError, match="TAU2_DATA_DIR"):
+            find_tau2_data_dir()
 
 
 def test_find_tau2_data_dir_returns_path_when_env_var_exists(tmp_path: Path) -> None:

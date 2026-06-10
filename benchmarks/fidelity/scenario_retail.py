@@ -4,11 +4,11 @@ The Rubric reward function reproduces tau2's gold reward by construction:
 it converts korrel canonical messages back to tau2 message objects,
 reconstructs the SimulationRun fields the evaluator needs from `info`,
 looks up the tau2 Task by task_id from the pinned tau2 data, and calls
-tau2's evaluate_simulation with EvaluationType.ALL.
+tau2's evaluate_simulation with EvaluationType.ALL_IGNORE_BASIS.
 
 Fidelity claim: for every frozen transcript in transcripts/retail/,
   scenario.rubric.score(completion, info).score == gold_reward
-to floating-point equality (or within 1e-9 relative tolerance).
+to exact float equality.
 
 Source pins confirmed on 2026-06-10:
   tau2-bench v1.0.0 @ 17e07b1da2bbc0cadfddeea36412686e0604127b
@@ -36,8 +36,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from korrel.persona import Persona
 from korrel.rubric import Rubric
 from korrel.scenario import Scenario
+from korrel.tools import MockTool
 from korrel.types import Message
 
 from ._convert import korrel_messages_to_tau2
@@ -79,7 +81,7 @@ def tau2_retail_reward(
     -------
     float
         The reward from tau2.evaluator.evaluator.evaluate_simulation with
-        EvaluationType.ALL, domain="retail", solo_mode=False,
+        EvaluationType.ALL_IGNORE_BASIS, domain="retail", solo_mode=False,
         mode=HALF_DUPLEX.  Returns 0.0 if termination_reason is not in
         {AGENT_STOP, USER_STOP} (matching evaluate_simulation's own check).
     """
@@ -87,10 +89,6 @@ def tau2_retail_reward(
     from tau2.data_model.simulation import SimulationRun, TerminationReason
     from tau2.evaluator.evaluator import EvaluationType, evaluate_simulation
     from tau2.orchestrator.modes import CommunicationMode
-
-    from korrel.types import Message as KorrelMessage
-
-    from ._convert import korrel_messages_to_tau2
 
     task_id: str = info["task_id"]
     termination_reason_str: str = info["termination_reason"]
@@ -170,11 +168,6 @@ def _load_retail_task(task_id: str) -> Any:
 # The rubric is the load-bearing component: it wraps tau2_retail_reward with
 # a pass threshold of 1.0 (since tau2's product-of-components reward only
 # reaches 1.0 when all required criteria are met).
-
-from korrel.persona import Persona
-from korrel.rubric import Rubric
-from korrel.scenario import Scenario
-from korrel.tools import MockTool
 
 _STUB_PERSONA = Persona(
     goal=(

@@ -492,10 +492,14 @@ def _score_transcript(
 
 
 def _korrel_version() -> str:
+    return _installed_version("korrel")
+
+
+def _installed_version(dist: str) -> str:
     try:
         import importlib.metadata
 
-        return importlib.metadata.version("korrel")
+        return importlib.metadata.version(dist)
     except Exception:  # noqa: BLE001
         return "unknown"
 
@@ -683,8 +687,8 @@ def run_selftest() -> None:
         "mode": "selftest",
         "fixtures": [SELFTEST_FIXTURE.name, SELFTEST_PASS_FIXTURE.name],
         "tau2_pin": TAU2_PIN,
-        "verifiers_version": "0.1.14",
-        "openenv_core_version": "0.3.0",
+        "verifiers_version": _installed_version("verifiers"),
+        "openenv_core_version": _installed_version("openenv-core"),
         "korrel_version": _korrel_version(),
         "python_version": platform.python_version(),
         "n_reruns_stability": N_RERUNS,
@@ -839,8 +843,8 @@ def main() -> None:
         "pass_threshold": 1.0,
         "fidelity_tolerance": "exact float equality",
         "n_reruns_stability": N_RERUNS,
-        "verifiers_version": "0.1.14",
-        "openenv_core_version": "0.3.0",
+        "verifiers_version": _installed_version("verifiers"),
+        "openenv_core_version": _installed_version("openenv-core"),
         "korrel_version": _korrel_version(),
         "python_version": platform.python_version(),
         "n_total": n_total,
@@ -862,8 +866,8 @@ def main() -> None:
         f.write(f"| Total runs | {n_total} |\n")
         f.write(f"| Pass (all four legs equal, flips=0) | {n_pass} |\n")
         f.write(f"| Fail | {n_fail} |\n")
-        f.write("| verifiers version | 0.1.14 |\n")
-        f.write("| openenv-core version | 0.3.0 |\n")
+        f.write(f"| verifiers version | {_installed_version('verifiers')} |\n")
+        f.write(f"| openenv-core version | {_installed_version('openenv-core')} |\n")
         f.write(f"| korrel version | {_korrel_version()} |\n")
         if failures:
             f.write("\n## Failures\n\n")
@@ -877,10 +881,14 @@ def main() -> None:
             file=sys.stderr,
         )
         sys.exit(1)
-    else:
-        print(
-            f"\nPASS: all {n_total} runs pass all four-way fidelity checks (flips=0)."
-        )
+    if n_total == 0:
+        # Unreachable while the empty-labels guard above holds; kept so a
+        # zero-run result can never report success.
+        print("FAIL: no runs were scored.", file=sys.stderr)
+        sys.exit(1)
+    print(
+        f"\nPASS: all {n_total} runs pass all four-way fidelity checks (flips=0)."
+    )
 
 
 # ---------------------------------------------------------------------------

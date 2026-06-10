@@ -104,7 +104,14 @@ def find_tau2_data_dir() -> Path:
             for checkout_dir in repo_dir.iterdir():
                 if not checkout_dir.is_dir():
                     continue
-                if checkout_dir.name.startswith(TAU2_SHORT_SHA):
+                # uv names checkout dirs by a truncated commit SHA. Require the
+                # dir name to be a prefix of the full pinned SHA (at least the
+                # 7-char short form) so a different commit sharing the short
+                # prefix in a longer dir name cannot match.
+                name = checkout_dir.name
+                if len(name) >= len(TAU2_SHORT_SHA) and TAU2_COMMIT_SHA.startswith(
+                    name.lower()
+                ):
                     candidate = checkout_dir / "data"
                     retail_check = (
                         candidate / "tau2" / "domains" / "retail" / "tasks.json"

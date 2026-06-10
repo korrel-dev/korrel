@@ -6,7 +6,7 @@ Key is read from the environment at call time and never stored.
 Runs tau2's runner on the 40-task retail slice (task ids 0-39, first 40 by
 ascending numeric sort) with two agent models:
   strong: anthropic/claude-sonnet-4-6
-  weak:   anthropic/claude-3-5-haiku-20241022
+  weak:   anthropic/claude-haiku-4-5-20251001
 
 tau2 uses litellm under the hood. Provider prefix: "anthropic/" routes via
 litellm's Anthropic provider. A single ANTHROPIC_API_KEY is sufficient.
@@ -20,9 +20,10 @@ Output: transcripts/retail/<task_id>__<model-slug>.run.json
 One file per (task, model). Files are serialized with SimulationRun.model_dump_json().
 
 Determinism knobs:
-  - seed=300 (tau2 DEFAULT_SEED, applied to both agent and user)
+  - seed=300 (tau2 DEFAULT_SEED, applied to the orchestrator; Anthropic's
+    Messages API does not accept a seed, so generation is not bit-reproducible)
   - temperature=0 for both agent and user (tau2 DEFAULT_LLM_TEMPERATURE_*)
-  - tau2's litellm routing passes seed/temperature to Anthropic's API.
+  - reproducibility of the benchmark comes from the frozen transcripts.
 
 Run with:
   export ANTHROPIC_API_KEY=sk-ant-...
@@ -56,7 +57,7 @@ TASK_IDS = [str(i) for i in range(40)]
 # tau2 uses litellm; "anthropic/" prefix routes to Anthropic's API.
 AGENT_MODELS = [
     ("sonnet", "anthropic/claude-sonnet-4-6"),
-    ("haiku", "anthropic/claude-3-5-haiku-20241022"),
+    ("haiku", "anthropic/claude-haiku-4-5-20251001"),
 ]
 
 # User simulator model (same key, anthropic prefix)

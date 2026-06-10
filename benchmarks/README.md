@@ -220,11 +220,14 @@ Two models generate trajectories so the label set spans pass and fail:
 | Slug | tau2 / litellm model string | Role |
 |---|---|---|
 | sonnet | `anthropic/claude-sonnet-4-6` | strong agent |
-| haiku | `anthropic/claude-3-5-haiku-20241022` | weak agent |
+| haiku | `anthropic/claude-haiku-4-5-20251001` | weak agent |
 
-Both use `temperature=0` and `seed=300` (tau2's `DEFAULT_SEED` from
-`src/tau2/config.py` at the pinned SHA). tau2 routes through litellm;
-the `anthropic/` prefix routes to Anthropic's API. A single
+Both use `temperature=0`. tau2's orchestrator uses `seed=300` (its
+`DEFAULT_SEED`), but the model API is not sent a seed (Anthropic's
+Messages API does not accept one), so generation is not bit-reproducible;
+this benchmark's reproducibility comes from the frozen transcripts, not
+from regeneration. tau2 routes through litellm; the `anthropic/` prefix
+routes to Anthropic's API. A single
 `ANTHROPIC_API_KEY` read from the environment at call time is sufficient
 for transcript generation. Keys are never stored.
 

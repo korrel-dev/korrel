@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Optional
 
 from .adapter import AgentAdapter
-from .runtime import RunResult, run_scenario
+from .runtime import RunResult, Transcript, run_scenario
 from .scenario import Scenario
 
 
@@ -38,17 +38,23 @@ def _safe_filename_stem(scenario_id: str) -> str:
     return stem
 
 
-def write_transcript_for(result: RunResult, scenario_id: str, out_dir: Path) -> Path:
-    """Write ``result.transcript`` as JSON and return the file path.
+def write_transcript(transcript: Transcript, scenario_id: str, out_dir: Path) -> Path:
+    """Write a transcript as JSON and return the file path.
 
     The file is ``<out_dir>/<scenario_id>.transcript.json``. ``scenario_id`` is
     reduced to a single safe path component first. ``out_dir`` is created if it
-    does not exist.
+    does not exist. Also used for the partial transcript carried by
+    ``ToolExecutionError``, which has no ``RunResult``.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"{_safe_filename_stem(scenario_id)}.transcript.json"
-    path.write_text(result.transcript.model_dump_json(), encoding="utf-8")
+    path.write_text(transcript.model_dump_json(), encoding="utf-8")
     return path
+
+
+def write_transcript_for(result: RunResult, scenario_id: str, out_dir: Path) -> Path:
+    """Write ``result.transcript`` as JSON and return the file path."""
+    return write_transcript(result.transcript, scenario_id, out_dir)
 
 
 # ---------------------------------------------------------------------------

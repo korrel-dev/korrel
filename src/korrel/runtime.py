@@ -33,6 +33,29 @@ class Turn(BaseModel):
     stop_reason: Optional[str] = None
 
 
+class ToolExecutionError(Exception):
+    """A mock tool raised while resolving an agent tool call.
+
+    Carries the failing tool's name, the original exception, and the partial
+    transcript built up to the failure (system plus every message up to and
+    including the assistant tool call that triggered it), so the run context
+    is preserved exactly when it is most useful for debugging.
+    """
+
+    def __init__(
+        self,
+        tool_name: str,
+        original: BaseException,
+        transcript: "Transcript",
+    ) -> None:
+        self.tool_name = tool_name
+        self.original = original
+        self.transcript = transcript
+        super().__init__(
+            f"tool {tool_name!r} raised {type(original).__name__}: {original}"
+        )
+
+
 class Transcript(BaseModel):
     """The full record of a run."""
 
@@ -97,6 +120,23 @@ def _resolve_tool_call(
 
     content = result if isinstance(result, str) else json.dumps(result)
     return Message(role="tool", content=content, tool_call_id=call.id)
+
+
+def _build_transcript(
+    messages: list[Message],
+    turns: list[Turn],
+    user_sim: Any,
+    run_seed: int,
+) -> Transcript:
+    model = getattr(user_sim, "model", None)
+    params = getattr(user_sim, "params", {}) if hasattr(user_sim, "params") else {}
+    return Transcript(
+        messages=messages,
+        turns=turns,
+        model=model,
+        params=params,
+        seed=run_seed,
+    )
 
 
 def _cluster_failures(rubric_result: RubricResult) -> list[FailureCluster]:
@@ -165,7 +205,23 @@ def run_scenario(
                 turn_stop_reason = "max_tool_rounds"
                 break
             for call in assistant.tool_calls:
-                tool_message = _resolve_tool_call(call, tools_by_name, state)
+                try:
+                    tool_message = _resolve_tool_call(call, tools_by_name, state)
+                except Exception as exc:
+                    # A raising tool still fails the run (unchanged semantics),
+                    # but the transcript built so far is attached instead of
+                    # lost. The in-progress turn is included so the failing
+                    # assistant tool call is visible.
+                    partial_turns = turns + [
+                        Turn(index=turn_index, messages=turn_messages)
+                    ]
+                    raise ToolExecutionError(
+                        tool_name=call.function.name,
+                        original=exc,
+                        transcript=_build_transcript(
+                            messages, partial_turns, user_sim, run_seed
+                        ),
+                    ) from exc
                 messages.append(tool_message)
                 turn_messages.append(tool_message)
             assistant = adapter(messages, tool_schemas)
@@ -185,15 +241,7 @@ def run_scenario(
             break
         pending_user = Message(role="user", content=next_user)
 
-    model = getattr(user_sim, "model", None)
-    params = getattr(user_sim, "params", {}) if hasattr(user_sim, "params") else {}
-    transcript = Transcript(
-        messages=messages,
-        turns=turns,
-        model=model,
-        params=params,
-        seed=run_seed,
-    )
+    transcript = _build_transcript(messages, turns, user_sim, run_seed)
 
     if scenario.rubric is None:
         rubric_result = RubricResult(

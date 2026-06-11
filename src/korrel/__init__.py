@@ -11,6 +11,7 @@ from .rubric import Rubric, RewardFn, make_judge
 from .runtime import (
     FailureCluster,
     RunResult,
+    ToolExecutionError,
     Transcript,
     Turn,
     run_scenario,
@@ -31,6 +32,7 @@ __all__ = [
     "Transcript",
     "Turn",
     "FailureCluster",
+    "ToolExecutionError",
     "AgentAdapter",
     "adapter_from_provider",
     "Message",

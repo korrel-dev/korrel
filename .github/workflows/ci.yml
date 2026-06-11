@@ -80,6 +80,11 @@ jobs:
         with:
           python-version: "3.13"
 
+      # tau2[voice] depends on pyaudio, which has no Linux wheel for 3.13 and
+      # builds from source against the portaudio C headers.
+      - name: Install portaudio headers (pyaudio build dependency of tau2)
+        run: sudo apt-get update && sudo apt-get install -y portaudio19-dev
+
       # run.py performs the uv sync itself (its first step), so no explicit
       # sync step is needed; the system Python only orchestrates subprocesses.
       - name: Run the fidelity benchmark (offline, no keys)

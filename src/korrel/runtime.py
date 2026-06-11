@@ -57,13 +57,20 @@ class ToolExecutionError(Exception):
 
 
 class Transcript(BaseModel):
-    """The full record of a run."""
+    """The full record of a run.
+
+    ``stop_reason`` records why the simulation loop ended: ``"persona_ended"``
+    when the user-simulator returned no next message, ``"max_turns"`` when the
+    turn budget was exhausted. ``None`` on a partial transcript (the run was
+    interrupted before either end condition, for example by a raising tool).
+    """
 
     messages: list[Message]
     turns: list[Turn]
     model: Optional[str] = None
     params: dict[str, Any] = {}
     seed: int = 0
+    stop_reason: Optional[str] = None
 
 
 class FailureCluster(BaseModel):
@@ -96,6 +103,13 @@ class RunResult(BaseModel):
     # see them) and the judge's scoring-time call (it runs inside rubric.score,
     # outside the loop). Every counted call is billed to the user's provider key.
     model_calls: int = 0
+    # Why the loop ended: "persona_ended" or "max_turns" (mirrors
+    # transcript.stop_reason). A "max_turns" value means the run was cut by the
+    # turn budget, not completed naturally.
+    stop_reason: Optional[str] = None
+    # Count of turns whose tool loop hit max_tool_rounds (each such turn has
+    # Turn.stop_reason == "max_tool_rounds"). Zero when no turn was capped.
+    tool_rounds_capped: int = 0
 
 
 def _tool_schemas(scenario: Scenario) -> list[dict[str, Any]]:
@@ -127,6 +141,7 @@ def _build_transcript(
     turns: list[Turn],
     user_sim: Any,
     run_seed: int,
+    stop_reason: Optional[str] = None,
 ) -> Transcript:
     model = getattr(user_sim, "model", None)
     params = getattr(user_sim, "params", {}) if hasattr(user_sim, "params") else {}
@@ -136,6 +151,7 @@ def _build_transcript(
         model=model,
         params=params,
         seed=run_seed,
+        stop_reason=stop_reason,
     )
 
 
@@ -186,6 +202,12 @@ def run_scenario(
     # cannot leak across runs.
     model_calls = 0
 
+    # Why the loop ended. The loop exits in exactly two ways: the persona
+    # returns no next message ("persona_ended"), or the turn budget is
+    # exhausted ("max_turns"). max_turns >= 1 guarantees one of the two breaks
+    # below always fires.
+    run_stop_reason: Optional[str] = None
+
     for turn_index in range(scenario.max_turns):
         turn_messages: list[Message] = []
         if pending_user is not None:
@@ -233,15 +255,19 @@ def run_scenario(
         turns.append(Turn(index=turn_index, messages=turn_messages, stop_reason=turn_stop_reason))
 
         if turn_index == scenario.max_turns - 1:
+            run_stop_reason = "max_turns"
             break
 
         next_user = user_sim.next_message(messages)
         model_calls += 1
         if not next_user:
+            run_stop_reason = "persona_ended"
             break
         pending_user = Message(role="user", content=next_user)
 
-    transcript = _build_transcript(messages, turns, user_sim, run_seed)
+    transcript = _build_transcript(
+        messages, turns, user_sim, run_seed, stop_reason=run_stop_reason
+    )
 
     if scenario.rubric is None:
         rubric_result = RubricResult(
@@ -259,4 +285,8 @@ def run_scenario(
         clusters=clusters,
         rubric_result=rubric_result,
         model_calls=model_calls,
+        stop_reason=run_stop_reason,
+        tool_rounds_capped=sum(
+            1 for turn in turns if turn.stop_reason == "max_tool_rounds"
+        ),
     )

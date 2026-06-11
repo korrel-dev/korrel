@@ -10,8 +10,9 @@ Resolution order:
 2. Walk Python's sys.path to find tau2/utils/utils.py; walk up from there to
    find data/tau2/domains/retail/tasks.json (works when installed from source
    or TAU2_DATA_DIR already set by utils.py).
-3. Search the uv git cache for the pinned commit SHA (cross-platform:
-   %LOCALAPPDATA%/uv/cache on Windows, ~/.cache/uv on Linux/macOS).
+3. Search the uv git cache for the pinned commit SHA (UV_CACHE_DIR when set,
+   else the platform default: %LOCALAPPDATA%/uv/cache on Windows,
+   ~/.cache/uv on Linux/macOS).
 4. Raises RuntimeError with a clear message if none of the above works.
 
 IMPORTANT: call `ensure_tau2_data_dir()` BEFORE importing tau2. tau2.utils.utils
@@ -34,6 +35,12 @@ TAU2_SHORT_SHA = TAU2_COMMIT_SHA[:7]  # "17e07b1"
 def _uv_cache_dirs() -> list[Path]:
     """Return candidate uv cache roots for the current platform."""
     candidates = []
+    # Explicit override: uv honors UV_CACHE_DIR, and the GitHub setup-uv
+    # action sets it on CI runners, so the git checkout lives under it
+    # rather than the platform default.
+    uv_cache_dir = os.environ.get("UV_CACHE_DIR")
+    if uv_cache_dir:
+        candidates.append(Path(uv_cache_dir))
     # Windows
     local_app_data = os.environ.get("LOCALAPPDATA")
     if local_app_data:

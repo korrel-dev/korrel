@@ -88,7 +88,6 @@ export ANTHROPIC_API_KEY=...
 ```python
 from korrel import MockTool, Persona, Rubric, Scenario, adapter_from_provider
 from korrel.providers import AnthropicProvider
-from korrel.types import Message
 
 def lookup_order(arguments, state):
     state["called"] = True
@@ -203,7 +202,7 @@ Each scenario file in the CI gate must expose both a module-level `scenario` and
 ## The four objects
 
 - `Scenario`: a code-first test definition. Holds the system prompt, a `Persona`, the opening message, mock tools, `max_turns`, `max_tool_rounds`, a `seed`, ground-truth `info`, and a `Rubric`.
-- `Persona`: the LLM-driven user-simulator. Given the conversation so far, it produces the next user message. Defaults to Claude.
+- `Persona`: the LLM-driven user-simulator. Given the conversation so far, it produces the next user message. Defaults to Claude. `Scenario.persona` is required even for single-turn scenarios; at `max_turns=1` it is constructed but never invoked, so the offline quickstart makes no model call and needs no key.
 - `MockTool`: a programmable tool. Holds a chat-completions tool schema and a `respond` callable that takes parsed arguments and a mutable per-run state and returns a result.
 - `Rubric`: reward functions plus an optional hardened LLM judge. Reward signatures mirror verifiers: `(completion, info, **kwargs) -> float`. The judge treats the transcript as data, never as instructions.
 
@@ -223,6 +222,8 @@ from korrel import run_scenario
 result = run_scenario(scenario, adapter)
 print(result.score, result.passed, result.failed_functions)
 ```
+
+`run_scenario(persona=...)` overrides the scenario's persona for the run. The override is not limited to `Persona` instances: any object exposing `next_message(messages) -> Optional[str]` works, which is how tests inject a deterministic fake user-simulator with no model calls. The same override is accepted by `to_verifiers_env(persona=...)`, `build_environment_class(persona=...)`, and the `load_environment(persona=...)` function of an exported verifiers package.
 
 `examples/support_refund.py` holds a runnable scenario definition with a real `AnthropicProvider` adapter.
 

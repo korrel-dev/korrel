@@ -174,8 +174,11 @@ def run_scenario(
     """Run a scenario against an adapter and score the transcript.
 
     The transcript is scored with ``scenario.rubric`` if one is attached.
-    ``persona`` overrides ``scenario.persona`` (used to inject a fake
-    user-simulator in tests). ``seed`` overrides ``scenario.seed``.
+    ``persona`` overrides ``scenario.persona`` for the run. The override is
+    not limited to ``Persona`` instances: any object exposing
+    ``next_message(messages) -> Optional[str]`` works, which is how tests
+    inject a deterministic fake user-simulator with no model calls.
+    ``seed`` overrides ``scenario.seed``.
     """
 
     run_seed = seed if seed is not None else scenario.seed

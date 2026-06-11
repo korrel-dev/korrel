@@ -103,3 +103,27 @@ jobs:
           assert flips == 0, f"expected 0 verdict flips, got {flips}"
           print("benchmark reproduced: 80/80, 0 verdict flips")
           EOF
+
+  # Validates the in-repo scenarios gallery offline. Contributed scenarios run
+  # here, so the job is strictly offline and secret-free: no ANTHROPIC_API_KEY,
+  # no network. gallery/_ci_check.py runs every entry and asserts its documented
+  # outcome, and exports the export-marked entries to verifiers and openenv and
+  # loads the generated package. Python 3.13 because the verifiers extra caps at
+  # <3.14, matching the export jobs above.
+  gallery:
+    name: gallery (Python 3.13)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6.0.3
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v8.2.0
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies with export extras
+        run: uv sync --extra verifiers --extra openenv
+
+      - name: Validate the gallery offline (no key, no network)
+        run: uv run python gallery/_ci_check.py

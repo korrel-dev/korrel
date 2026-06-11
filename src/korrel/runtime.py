@@ -33,14 +33,44 @@ class Turn(BaseModel):
     stop_reason: Optional[str] = None
 
 
+class ToolExecutionError(Exception):
+    """A mock tool raised while resolving an agent tool call.
+
+    Carries the failing tool's name, the original exception, and the partial
+    transcript built up to the failure (system plus every message up to and
+    including the assistant tool call that triggered it), so the run context
+    is preserved exactly when it is most useful for debugging.
+    """
+
+    def __init__(
+        self,
+        tool_name: str,
+        original: BaseException,
+        transcript: "Transcript",
+    ) -> None:
+        self.tool_name = tool_name
+        self.original = original
+        self.transcript = transcript
+        super().__init__(
+            f"tool {tool_name!r} raised {type(original).__name__}: {original}"
+        )
+
+
 class Transcript(BaseModel):
-    """The full record of a run."""
+    """The full record of a run.
+
+    ``stop_reason`` records why the simulation loop ended: ``"persona_ended"``
+    when the user-simulator returned no next message, ``"max_turns"`` when the
+    turn budget was exhausted. ``None`` on a partial transcript (the run was
+    interrupted before either end condition, for example by a raising tool).
+    """
 
     messages: list[Message]
     turns: list[Turn]
     model: Optional[str] = None
     params: dict[str, Any] = {}
     seed: int = 0
+    stop_reason: Optional[str] = None
 
 
 class FailureCluster(BaseModel):
@@ -73,6 +103,13 @@ class RunResult(BaseModel):
     # see them) and the judge's scoring-time call (it runs inside rubric.score,
     # outside the loop). Every counted call is billed to the user's provider key.
     model_calls: int = 0
+    # Why the loop ended: "persona_ended" or "max_turns" (mirrors
+    # transcript.stop_reason). A "max_turns" value means the run was cut by the
+    # turn budget, not completed naturally.
+    stop_reason: Optional[str] = None
+    # Count of turns whose tool loop hit max_tool_rounds (each such turn has
+    # Turn.stop_reason == "max_tool_rounds"). Zero when no turn was capped.
+    tool_rounds_capped: int = 0
 
 
 def _tool_schemas(scenario: Scenario) -> list[dict[str, Any]]:
@@ -99,6 +136,25 @@ def _resolve_tool_call(
     return Message(role="tool", content=content, tool_call_id=call.id)
 
 
+def _build_transcript(
+    messages: list[Message],
+    turns: list[Turn],
+    user_sim: Any,
+    run_seed: int,
+    stop_reason: Optional[str] = None,
+) -> Transcript:
+    model = getattr(user_sim, "model", None)
+    params = getattr(user_sim, "params", {})
+    return Transcript(
+        messages=messages,
+        turns=turns,
+        model=model,
+        params=params,
+        seed=run_seed,
+        stop_reason=stop_reason,
+    )
+
+
 def _cluster_failures(rubric_result: RubricResult) -> list[FailureCluster]:
     clusters: list[FailureCluster] = []
     for name in rubric_result.failed_functions:
@@ -118,8 +174,11 @@ def run_scenario(
     """Run a scenario against an adapter and score the transcript.
 
     The transcript is scored with ``scenario.rubric`` if one is attached.
-    ``persona`` overrides ``scenario.persona`` (used to inject a fake
-    user-simulator in tests). ``seed`` overrides ``scenario.seed``.
+    ``persona`` overrides ``scenario.persona`` for the run. The override is
+    not limited to ``Persona`` instances: any object exposing
+    ``next_message(messages) -> Optional[str]`` works, which is how tests
+    inject a deterministic fake user-simulator with no model calls.
+    ``seed`` overrides ``scenario.seed``.
     """
 
     run_seed = seed if seed is not None else scenario.seed
@@ -146,6 +205,12 @@ def run_scenario(
     # cannot leak across runs.
     model_calls = 0
 
+    # Why the loop ended. The loop exits in exactly two ways: the persona
+    # returns no next message ("persona_ended"), or the turn budget is
+    # exhausted ("max_turns"). max_turns >= 1 guarantees one of the two breaks
+    # below always fires.
+    run_stop_reason: Optional[str] = None
+
     for turn_index in range(scenario.max_turns):
         turn_messages: list[Message] = []
         if pending_user is not None:
@@ -165,7 +230,23 @@ def run_scenario(
                 turn_stop_reason = "max_tool_rounds"
                 break
             for call in assistant.tool_calls:
-                tool_message = _resolve_tool_call(call, tools_by_name, state)
+                try:
+                    tool_message = _resolve_tool_call(call, tools_by_name, state)
+                except Exception as exc:
+                    # A raising tool still fails the run (unchanged semantics),
+                    # but the transcript built so far is attached instead of
+                    # lost. The in-progress turn is included so the failing
+                    # assistant tool call is visible.
+                    partial_turns = turns + [
+                        Turn(index=turn_index, messages=turn_messages)
+                    ]
+                    raise ToolExecutionError(
+                        tool_name=call.function.name,
+                        original=exc,
+                        transcript=_build_transcript(
+                            messages, partial_turns, user_sim, run_seed
+                        ),
+                    ) from exc
                 messages.append(tool_message)
                 turn_messages.append(tool_message)
             assistant = adapter(messages, tool_schemas)
@@ -177,22 +258,18 @@ def run_scenario(
         turns.append(Turn(index=turn_index, messages=turn_messages, stop_reason=turn_stop_reason))
 
         if turn_index == scenario.max_turns - 1:
+            run_stop_reason = "max_turns"
             break
 
         next_user = user_sim.next_message(messages)
         model_calls += 1
         if not next_user:
+            run_stop_reason = "persona_ended"
             break
         pending_user = Message(role="user", content=next_user)
 
-    model = getattr(user_sim, "model", None)
-    params = getattr(user_sim, "params", {}) if hasattr(user_sim, "params") else {}
-    transcript = Transcript(
-        messages=messages,
-        turns=turns,
-        model=model,
-        params=params,
-        seed=run_seed,
+    transcript = _build_transcript(
+        messages, turns, user_sim, run_seed, stop_reason=run_stop_reason
     )
 
     if scenario.rubric is None:
@@ -211,4 +288,8 @@ def run_scenario(
         clusters=clusters,
         rubric_result=rubric_result,
         model_calls=model_calls,
+        stop_reason=run_stop_reason,
+        tool_rounds_capped=sum(
+            1 for turn in turns if turn.stop_reason == "max_tool_rounds"
+        ),
     )

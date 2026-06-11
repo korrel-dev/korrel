@@ -31,6 +31,10 @@ class Persona(BaseModel):
     act. The remaining fields configure the simulator's own model call. Pass an
     instantiated client through ``client`` to reuse a connection; otherwise the
     key is read from the environment at call time.
+
+    ``Scenario.persona`` is required even for single-turn scenarios. At
+    ``max_turns=1`` the persona is constructed but never invoked: the run
+    makes no model call and needs no key.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)

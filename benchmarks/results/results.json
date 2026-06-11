@@ -3,7 +3,7 @@
   "domain": "retail",
   "evaluation_type": "EvaluationType.ALL_IGNORE_BASIS",
   "fidelity_tolerance": "exact float equality",
-  "korrel_version": "0.1.0",
+  "korrel_version": "0.1.2",
   "mode": "benchmark",
   "n_fail": 0,
   "n_pass": 80,

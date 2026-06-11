@@ -44,8 +44,16 @@ orders_tool = MockTool(
 )
 
 
-def confirmed_refund_amount(completion: list[Message], info: dict[str, Any]) -> float:
-    """1.0 if an assistant turn confirms the refund and states the amount."""
+def confirmed_refund_amount(
+    completion: list[Message], info: dict[str, Any], **kwargs: Any
+) -> float:
+    """1.0 if an assistant turn confirms the refund and states the amount.
+
+    The ``**kwargs`` is part of the reward-function contract: verifiers
+    invokes reward functions with a merged kwargs mapping, so a function
+    without it breaks when the scenario is exported (see
+    docs/spec/korrel-to-verifiers.md).
+    """
 
     amount = f"{info['amount']:.2f}"
     for message in completion:

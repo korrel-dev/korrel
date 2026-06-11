@@ -519,6 +519,7 @@ _ENVIRONMENT_PY = '''\
 from __future__ import annotations
 
 import importlib.util
+import sys
 from pathlib import Path
 from typing import Any, Optional
 from uuid import uuid4
@@ -538,10 +539,15 @@ except ImportError:
 def _load_scenario():
     """Load the scenario object from the bundled _scenario.py."""
     src = Path(__file__).parent.parent / "_scenario.py"
-    spec = importlib.util.spec_from_file_location("_scenario", src)
+    # The in-memory module name is unique per environment so two exported
+    # packages imported in one process do not collide on a shared
+    # sys.modules entry (and the scenario module cannot shadow the
+    # environment module). The on-disk filename stays _scenario.py.
+    spec = importlib.util.spec_from_file_location({scenario_module_name!r}, src)
     if spec is None or spec.loader is None:
         raise ImportError(f"Cannot load scenario from {{src}}")
     mod = importlib.util.module_from_spec(spec)
+    sys.modules[{scenario_module_name!r}] = mod
     spec.loader.exec_module(mod)  # type: ignore[union-attr]
     scenario = getattr(mod, {scenario_attr!r}, None)
     if scenario is None:
@@ -995,6 +1001,13 @@ def write_openenv_env(
     scenario_id_repr = repr(scenario.id)
     scenario_id_label = _sanitize_id_for_comment(scenario.id)
 
+    # Unique in-memory module name for the bundled scenario source, so two
+    # exported environments imported in one process do not collide on a
+    # shared sys.modules["_scenario"] entry. Built from env_module, which the
+    # K11 sanitization above asserts is a valid identifier, and interpolated
+    # via repr() in the template.
+    scenario_module_name = f"_korrel_scenario_{env_module}"
+
     # Shared substitution context for templates that need env_name or env_module.
     ctx = dict(
         env_name=env_name,
@@ -1002,6 +1015,7 @@ def write_openenv_env(
         scenario_id_label=scenario_id_label,
         scenario_id_repr=scenario_id_repr,
         scenario_attr=scenario_attr,
+        scenario_module_name=scenario_module_name,
     )
 
     # models.py

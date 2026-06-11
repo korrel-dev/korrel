@@ -228,3 +228,86 @@ def test_max_tool_rounds_negative_raises():
             opening_message="hi",
             max_tool_rounds=-1,
         )
+
+
+# ---------------------------------------------------------------------------
+# Run-level cap markers (Transcript.stop_reason, RunResult surfacing)
+# ---------------------------------------------------------------------------
+
+
+def test_run_stop_reason_max_turns_when_persona_never_ends():
+    # The persona queue never empties before max_turns: the turn budget cuts
+    # the run, and the run-level marker says so.
+    adapter = ScriptedAdapter(
+        [Message(role="assistant", content=f"answer {i}") for i in range(3)]
+    )
+    persona = ScriptedPersona(["again", "more", "still going"])
+    scenario = _scenario(max_turns=3)
+
+    result = run_scenario(scenario, adapter, persona=persona, seed=1)
+
+    assert result.transcript.stop_reason == "max_turns"
+    assert result.stop_reason == "max_turns"
+
+
+def test_run_stop_reason_persona_ended():
+    # The persona returns None before the budget: a natural end, not a cap.
+    adapter = ScriptedAdapter(
+        [
+            Message(role="assistant", content="one"),
+            Message(role="assistant", content="two"),
+        ]
+    )
+    persona = ScriptedPersona([])
+    scenario = _scenario(max_turns=5)
+
+    result = run_scenario(scenario, adapter, persona=persona, seed=1)
+
+    assert result.transcript.stop_reason == "persona_ended"
+    assert result.stop_reason == "persona_ended"
+
+
+def test_run_stop_reason_max_turns_at_one_turn():
+    # max_turns=1 ends on the turn budget without invoking the persona.
+    adapter = ScriptedAdapter([Message(role="assistant", content="only")])
+    persona = ScriptedPersona(["never used"])
+    scenario = _scenario(max_turns=1)
+
+    result = run_scenario(scenario, adapter, persona=persona, seed=1)
+
+    assert result.stop_reason == "max_turns"
+    assert persona.calls == 0
+
+
+def test_tool_rounds_capped_surfaced_on_run_result():
+    # A turn that hits max_tool_rounds is counted on RunResult; the per-turn
+    # stop_reason behavior is unchanged.
+    adapter = ScriptedAdapter([_tool_msg()] * 20)
+    persona = ScriptedPersona([])
+    scenario = _scenario(max_tool_rounds=2)
+
+    result = run_scenario(scenario, adapter, persona=persona, seed=1)
+
+    assert result.transcript.turns[0].stop_reason == "max_tool_rounds"
+    assert result.tool_rounds_capped == 1
+
+
+def test_tool_rounds_capped_zero_when_under_cap():
+    adapter = ScriptedAdapter([_tool_msg(), Message(role="assistant", content="done")])
+    persona = ScriptedPersona([])
+    scenario = _scenario(max_tool_rounds=3)
+
+    result = run_scenario(scenario, adapter, persona=persona, seed=1)
+
+    assert result.tool_rounds_capped == 0
+
+
+def test_tool_rounds_capped_counts_multiple_turns():
+    # Both turns hit the cap: the count reflects it.
+    adapter = ScriptedAdapter([_tool_msg()] * 40)
+    persona = ScriptedPersona(["follow up"])
+    scenario = _scenario(max_tool_rounds=1, max_turns=2)
+
+    result = run_scenario(scenario, adapter, persona=persona, seed=1)
+
+    assert result.tool_rounds_capped == 2

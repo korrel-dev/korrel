@@ -3,7 +3,7 @@
     "synthetic_task0.run.json",
     "synthetic_task0_pass.run.json"
   ],
-  "korrel_version": "0.1.0",
+  "korrel_version": "0.1.3",
   "mode": "selftest",
   "n_reruns_stability": 20,
   "openenv_core_version": "0.3.0",

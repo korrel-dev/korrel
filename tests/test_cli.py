@@ -501,6 +501,309 @@ def test_cli_run_transcript_path_printed(tmp_path, capsys):
     assert "transcript" in captured.out
 
 
+# ---------------------------------------------------------------------------
+# Clean error surfaces: missing key, raising tool, generic failure
+# ---------------------------------------------------------------------------
+
+
+MISSING_KEY_MODULE = """\
+from korrel import Scenario
+from korrel.persona import Persona
+from korrel.providers import MissingAPIKeyError
+
+scenario = Scenario(
+    id="missing_key_test",
+    system="test",
+    persona=Persona(goal="g", behavior="b"),
+    opening_message="hello",
+)
+
+class _KeylessAdapter:
+    def __call__(self, messages, tools):
+        raise MissingAPIKeyError(
+            "No API key found in ANTHROPIC_API_KEY. Korrel reads provider "
+            "keys from the environment at call time and stores none. Set the "
+            "variable or pass an instantiated client."
+        )
+
+adapter = _KeylessAdapter()
+"""
+
+RAISING_TOOL_MODULE = """\
+from korrel import Message, MockTool, Scenario, ToolCall, ToolFunction
+from korrel.persona import Persona
+
+def explode(args, state):
+    raise ValueError("boom from the mock tool")
+
+scenario = Scenario(
+    id="cli_tool_error_test",
+    system="test",
+    persona=Persona(goal="g", behavior="b"),
+    opening_message="hello",
+    tools=[MockTool(
+        name="exploder",
+        schema={
+            "type": "function",
+            "function": {
+                "name": "exploder",
+                "description": "Always raises.",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        },
+        respond=explode,
+    )],
+)
+
+class _Adapter:
+    def __call__(self, messages, tools):
+        return Message(
+            role="assistant",
+            tool_calls=[ToolCall(
+                id="c1",
+                function=ToolFunction(name="exploder", arguments="{}"),
+            )],
+        )
+
+adapter = _Adapter()
+"""
+
+GENERIC_FAILURE_MODULE = """\
+from korrel import Scenario
+from korrel.persona import Persona
+
+scenario = Scenario(
+    id="generic_failure_test",
+    system="test",
+    persona=Persona(goal="g", behavior="b"),
+    opening_message="hello",
+)
+
+class _BrokenAdapter:
+    def __call__(self, messages, tools):
+        raise ConnectionError("simulated transport failure")
+
+adapter = _BrokenAdapter()
+"""
+
+
+def test_cli_run_missing_key_prints_single_error_line(tmp_path, capsys):
+    f = tmp_path / "missing_key_scenario.py"
+    f.write_text(MISSING_KEY_MODULE, encoding="utf-8")
+
+    from korrel.cli import main
+    with pytest.raises(SystemExit) as exc_info:
+        main(["run", str(f), "--out", str(tmp_path / "out")])
+    assert exc_info.value.code == 1
+
+    captured = capsys.readouterr()
+    error_lines = [l for l in captured.err.splitlines() if l.startswith("error:")]
+    assert len(error_lines) == 1
+    assert "ANTHROPIC_API_KEY" in error_lines[0]
+    assert "Traceback" not in captured.err
+
+
+def test_cli_run_raising_tool_prints_error_and_writes_transcript(tmp_path, capsys):
+    f = tmp_path / "tool_error_scenario.py"
+    f.write_text(RAISING_TOOL_MODULE, encoding="utf-8")
+    out_dir = tmp_path / "out"
+
+    from korrel.cli import main
+    with pytest.raises(SystemExit) as exc_info:
+        main(["run", str(f), "--out", str(out_dir)])
+    assert exc_info.value.code == 1
+
+    captured = capsys.readouterr()
+    error_lines = [l for l in captured.err.splitlines() if l.startswith("error:")]
+    assert len(error_lines) == 1
+    assert "tool 'exploder' raised" in error_lines[0]
+    assert "boom from the mock tool" in error_lines[0]
+    assert "Traceback" not in captured.err
+
+    transcript_file = out_dir / "cli_tool_error_test.transcript.json"
+    assert transcript_file.exists()
+    data = json.loads(transcript_file.read_text(encoding="utf-8"))
+    roles = [m["role"] for m in data["messages"]]
+    assert roles == ["system", "user", "assistant"]
+
+
+def test_cli_run_generic_failure_prints_single_error_line(tmp_path, capsys):
+    f = tmp_path / "generic_failure_scenario.py"
+    f.write_text(GENERIC_FAILURE_MODULE, encoding="utf-8")
+
+    from korrel.cli import main
+    with pytest.raises(SystemExit) as exc_info:
+        main(["run", str(f), "--out", str(tmp_path / "out")])
+    assert exc_info.value.code == 1
+
+    captured = capsys.readouterr()
+    error_lines = [l for l in captured.err.splitlines() if l.startswith("error:")]
+    assert len(error_lines) == 1
+    assert "run failed: ConnectionError: simulated transport failure" in error_lines[0]
+    assert "Traceback" not in captured.err
+
+
+# ---------------------------------------------------------------------------
+# --model flag, resolved-model line, cap lines in the summary
+# ---------------------------------------------------------------------------
+
+
+PROVIDER_ADAPTER_MODULE = """\
+from korrel import Scenario, Rubric, adapter_from_provider
+from korrel.persona import Persona
+from korrel.types import Message
+
+def always_one(completion, info, **kwargs):
+    return 1.0
+
+scenario = Scenario(
+    id="provider_model_test",
+    system="test",
+    persona=Persona(goal="g", behavior="b"),
+    opening_message="hello",
+    rubric=Rubric(funcs=[always_one], pass_threshold=0.5),
+)
+
+class _FakeProvider:
+    model = "fake-model-v1"
+
+    def complete(self, messages, *, system=None, tools=None, **kwargs):
+        return Message(role="assistant", content="done")
+
+adapter = adapter_from_provider(_FakeProvider())
+"""
+
+PERSONA_ENDED_MODULE = """\
+from korrel import Scenario, Rubric
+from korrel.persona import Persona
+from korrel.types import Message
+
+def always_one(completion, info, **kwargs):
+    return 1.0
+
+class _EndingPersona(Persona):
+    def next_message(self, messages):
+        return None
+
+scenario = Scenario(
+    id="persona_ended_test",
+    system="test",
+    persona=_EndingPersona(goal="g", behavior="b"),
+    opening_message="hello",
+    max_turns=3,
+    rubric=Rubric(funcs=[always_one], pass_threshold=0.5),
+)
+
+class _FakeAdapter:
+    def __call__(self, messages, tools):
+        return Message(role="assistant", content="done")
+
+adapter = _FakeAdapter()
+"""
+
+
+def test_adapter_from_provider_exposes_provider():
+    from korrel.providers import AnthropicProvider
+
+    provider = AnthropicProvider(model="claude-test-model")
+    adapter = adapter_from_provider(provider)
+    # The provider is reachable from the callable, and the model is readable
+    # without any live call.
+    assert adapter.provider is provider
+    assert adapter.provider.model == "claude-test-model"
+
+
+def test_cli_run_scripted_adapter_reports_model_unknown(tmp_path, capsys):
+    f = tmp_path / "pass_scenario.py"
+    f.write_text(PASSING_MODULE, encoding="utf-8")
+
+    from korrel.cli import main
+    with pytest.raises(SystemExit):
+        main(["run", str(f), "--out", str(tmp_path / "out")])
+    captured = capsys.readouterr()
+    assert "model       : unknown" in captured.out
+
+
+def test_cli_run_provider_adapter_reports_model(tmp_path, capsys):
+    f = tmp_path / "provider_scenario.py"
+    f.write_text(PROVIDER_ADAPTER_MODULE, encoding="utf-8")
+
+    from korrel.cli import main
+    with pytest.raises(SystemExit) as exc_info:
+        main(["run", str(f), "--out", str(tmp_path / "out")])
+    assert exc_info.value.code == 0
+    captured = capsys.readouterr()
+    assert "model       : fake-model-v1" in captured.out
+
+
+def test_cli_run_model_flag_overrides_provider_and_summary(tmp_path, capsys):
+    f = tmp_path / "provider_scenario.py"
+    f.write_text(PROVIDER_ADAPTER_MODULE, encoding="utf-8")
+
+    from korrel.cli import main
+    with pytest.raises(SystemExit) as exc_info:
+        main(["run", str(f), "--out", str(tmp_path / "out"), "--model", "override-x"])
+    assert exc_info.value.code == 0
+    captured = capsys.readouterr()
+    assert "model       : override-x" in captured.out
+
+
+def test_cli_run_model_flag_with_scripted_adapter_still_unknown(tmp_path, capsys):
+    # --model overrides the persona, but a scripted adapter exposes no
+    # provider, so the agent model stays unknown.
+    f = tmp_path / "pass_scenario.py"
+    f.write_text(PASSING_MODULE, encoding="utf-8")
+
+    from korrel.cli import main
+    with pytest.raises(SystemExit):
+        main(["run", str(f), "--out", str(tmp_path / "out"), "--model", "override-x"])
+    captured = capsys.readouterr()
+    assert "model       : unknown" in captured.out
+
+
+def test_cli_run_max_turns_capped_prints_stop_reason(tmp_path, capsys):
+    # Default max_turns=1: the turn budget ends the run, so the cap line
+    # appears.
+    f = tmp_path / "pass_scenario.py"
+    f.write_text(PASSING_MODULE, encoding="utf-8")
+
+    from korrel.cli import main
+    with pytest.raises(SystemExit):
+        main(["run", str(f), "--out", str(tmp_path / "out")])
+    captured = capsys.readouterr()
+    assert "stop reason : max_turns" in captured.out
+
+
+def test_cli_run_persona_ended_prints_no_stop_reason(tmp_path, capsys):
+    f = tmp_path / "persona_ended_scenario.py"
+    f.write_text(PERSONA_ENDED_MODULE, encoding="utf-8")
+
+    from korrel.cli import main
+    with pytest.raises(SystemExit) as exc_info:
+        main(["run", str(f), "--out", str(tmp_path / "out")])
+    assert exc_info.value.code == 0
+    captured = capsys.readouterr()
+    assert "stop reason" not in captured.out
+    assert "tool rounds" not in captured.out
+
+
+def test_missing_api_key_error_is_runtime_error_subclass():
+    from korrel.providers import MissingAPIKeyError
+
+    assert issubclass(MissingAPIKeyError, RuntimeError)
+
+
+def test_provider_get_client_raises_missing_api_key_error(monkeypatch):
+    from korrel.providers import AnthropicProvider, MissingAPIKeyError
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    provider = AnthropicProvider()
+    with pytest.raises(MissingAPIKeyError) as exc_info:
+        provider._get_client()
+    # The message instructs the user and never echoes a key value.
+    assert "ANTHROPIC_API_KEY" in str(exc_info.value)
+
+
 @pytest.mark.parametrize("scenario_attr,adapter_attr,expected_exit", [
     ("missing_scenario", "adapter", 1),
     ("scenario", "missing_adapter", 1),

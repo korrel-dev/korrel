@@ -15,7 +15,9 @@ class Scenario(BaseModel):
     """A single agent-simulation scenario.
 
     ``system`` is the system prompt for the agent under test. ``persona`` drives
-    the simulated user. ``opening_message`` is the first user turn.
+    the simulated user; it is required even for single-turn scenarios, and at
+    ``max_turns=1`` it is constructed but never invoked (no model call, no
+    key). ``opening_message`` is the first user turn.
     ``tools`` are the mock tools available to the agent. ``info`` is the ground
     truth handed to the rubric (for example expected answers). ``rubric`` scores
     the transcript after the run. ``seed`` pins scenario setup and any sampling

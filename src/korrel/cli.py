@@ -15,7 +15,8 @@ from pathlib import Path
 from typing import Optional
 
 from .adapter import AgentAdapter
-from .runtime import RunResult, run_scenario
+from .providers import MissingAPIKeyError
+from .runtime import RunResult, ToolExecutionError, Transcript, run_scenario
 from .scenario import Scenario
 
 
@@ -38,17 +39,23 @@ def _safe_filename_stem(scenario_id: str) -> str:
     return stem
 
 
-def write_transcript_for(result: RunResult, scenario_id: str, out_dir: Path) -> Path:
-    """Write ``result.transcript`` as JSON and return the file path.
+def write_transcript(transcript: Transcript, scenario_id: str, out_dir: Path) -> Path:
+    """Write a transcript as JSON and return the file path.
 
     The file is ``<out_dir>/<scenario_id>.transcript.json``. ``scenario_id`` is
     reduced to a single safe path component first. ``out_dir`` is created if it
-    does not exist.
+    does not exist. Also used for the partial transcript carried by
+    ``ToolExecutionError``, which has no ``RunResult``.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"{_safe_filename_stem(scenario_id)}.transcript.json"
-    path.write_text(result.transcript.model_dump_json(), encoding="utf-8")
+    path.write_text(transcript.model_dump_json(), encoding="utf-8")
     return path
+
+
+def write_transcript_for(result: RunResult, scenario_id: str, out_dir: Path) -> Path:
+    """Write ``result.transcript`` as JSON and return the file path."""
+    return write_transcript(result.transcript, scenario_id, out_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -246,21 +253,52 @@ def _cmd_run(args: argparse.Namespace) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
+    # --model overrides the persona's simulator model always, and the agent
+    # model when the adapter exposes a provider (adapter_from_provider attaches
+    # it as .provider). A scripted or custom adapter without one reports the
+    # agent model as unknown.
+    provider = getattr(adapter, "provider", None)
+    if args.model:
+        scenario.persona.model = args.model
+        if provider is not None and hasattr(provider, "model"):
+            provider.model = args.model
+    agent_model = getattr(provider, "model", None) or "unknown"
+
     seed: Optional[int] = args.seed
+    out_dir = Path(args.out) if args.out else Path(".korrel")
     t_start = time.monotonic()
-    result = run_scenario(scenario, adapter, seed=seed)
+    # No raw traceback ever escapes `korrel run`: a raising tool, a missing
+    # provider key, and any other run failure each become one clean stderr
+    # line and exit code 1. Error messages never contain a key value.
+    try:
+        result = run_scenario(scenario, adapter, seed=seed)
+    except ToolExecutionError as exc:
+        transcript_path = write_transcript(exc.transcript, scenario.id, out_dir)
+        print(f"error: tool {exc.tool_name!r} raised: {exc.original}", file=sys.stderr)
+        print(f"{'transcript':<12}: {transcript_path}", file=sys.stderr)
+        return 1
+    except MissingAPIKeyError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    except Exception as exc:
+        print(f"error: run failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 1
     duration_s = time.monotonic() - t_start
 
-    out_dir = Path(args.out) if args.out else Path(".korrel")
     transcript_path = write_transcript_for(result, scenario.id, out_dir)
 
     # Print result summary. The "model calls" label is wider than the prior
     # 10-char pad, so the pad is widened to 12 across every line to stay aligned.
     status = "pass" if result.passed else "fail"
     print(f"{'scenario':<12}: {scenario.id}")
+    print(f"{'model':<12}: {agent_model}")
     print(f"{'score':<12}: {result.score:.4f}")
     print(f"{'status':<12}: {status}")
     print(f"{'model calls':<12}: {result.model_calls}")
+    if result.stop_reason == "max_turns":
+        print(f"{'stop reason':<12}: max_turns")
+    if result.tool_rounds_capped:
+        print(f"{'tool rounds':<12}: capped")
     if result.failed_functions:
         print(f"{'failed':<12}: {', '.join(result.failed_functions)}")
     if result.clusters:
@@ -309,6 +347,15 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         help="Override the scenario seed.",
+    )
+    run_parser.add_argument(
+        "--model",
+        metavar="NAME",
+        default=None,
+        help=(
+            "Override the persona model, and the agent model when the "
+            "adapter exposes a provider."
+        ),
     )
     run_parser.add_argument(
         "--scenario-attr",

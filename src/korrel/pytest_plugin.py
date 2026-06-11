@@ -19,8 +19,8 @@ from typing import Any, Optional
 
 import pytest
 
-from .cli import load_module_from_path, write_transcript_for
-from .runtime import RunResult, run_scenario
+from .cli import load_module_from_path, write_transcript, write_transcript_for
+from .runtime import RunResult, ToolExecutionError, run_scenario
 from .scenario import Scenario
 
 
@@ -115,6 +115,25 @@ class KorrelScenarioFailed(AssertionError):
         )
 
 
+class KorrelToolFailed(AssertionError):
+    """Raised by KorrelItem.runtest() when a mock tool raises during a run."""
+
+    def __init__(
+        self,
+        scenario_id: str,
+        tool_name: str,
+        error: str,
+        transcript_path: Path,
+    ) -> None:
+        self.scenario_id = scenario_id
+        self.tool_name = tool_name
+        self.error = error
+        self.transcript_path = transcript_path
+        super().__init__(
+            f"scenario {scenario_id!r}: tool {tool_name!r} raised: {error}"
+        )
+
+
 class KorrelItem(pytest.Item):
     """A single runnable scenario item."""
 
@@ -145,11 +164,25 @@ class KorrelItem(pytest.Item):
                 f"(got {type(self._adapter).__name__})."
             )
 
-        result = run_scenario(self._scenario, self._adapter)
+        out_dir = Path(".korrel")
+        try:
+            result = run_scenario(self._scenario, self._adapter)
+        except ToolExecutionError as exc:
+            # A raising mock tool fails the item, but the partial transcript
+            # is written and the failure names the tool instead of dumping a
+            # raw traceback.
+            self._transcript_path = write_transcript(
+                exc.transcript, self._scenario.id, out_dir
+            )
+            raise KorrelToolFailed(
+                scenario_id=self._scenario.id,
+                tool_name=exc.tool_name,
+                error=str(exc.original),
+                transcript_path=self._transcript_path,
+            ) from exc
         self._result = result
 
         # Write transcript next to the test for debug access.
-        out_dir = Path(".korrel")
         self._transcript_path = write_transcript_for(result, self._scenario.id, out_dir)
 
         if not result.passed:
@@ -168,6 +201,15 @@ class KorrelItem(pytest.Item):
 
     def repr_failure(self, excinfo: Any, style: Any = None) -> str:
         exc = excinfo.value
+        if isinstance(exc, KorrelToolFailed):
+            lines = [
+                f"{'scenario':<10}: {exc.scenario_id}",
+                f"{'tool':<10}: {exc.tool_name}",
+                f"{'error':<10}: {exc.error}",
+                f"{'status':<10}: fail",
+                f"{'transcript':<10}: {exc.transcript_path}",
+            ]
+            return "\n".join(lines)
         if isinstance(exc, KorrelScenarioFailed):
             lines = [
                 f"{'scenario':<10}: {exc.scenario_id}",

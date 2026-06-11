@@ -14,13 +14,76 @@ Inside a uv project, add it as a dependency instead:
 uv add korrel
 ```
 
-Bring your own provider keys. Korrel reads keys from the environment at call time and stores none. The default provider is Claude via the `anthropic` SDK; set `ANTHROPIC_API_KEY`. The default model is `claude-sonnet-4-6` for both the agent provider and the `Persona`; override it with `AnthropicProvider(model=...)` and `Persona(..., model=...)`. OpenAI support is an optional extra (`korrel[openai]`).
-
 ## Quickstart
 
-The following is a complete path from installation to a passing scenario run.
+The first run needs no provider key and spends nothing. You write a scenario, run it against a scripted stand-in agent, and watch the gate pass or fail offline in well under a second. Step two swaps in a real agent for a live run.
 
-**1. Write a scenario module** (`support_refund.py`):
+**1. Write a scenario** (`refund_offline.py`):
+
+```python
+from korrel import Persona, Rubric, Scenario
+from korrel.types import Message
+
+# The agent under test, scripted for the offline gate: a plain callable, no
+# provider and no key. It returns a fixed assistant reply so you can see the
+# gate run with zero spend. Go live (below) replaces this with a real agent.
+def scripted_agent(messages, tools):
+    return Message(role="assistant", content="Your refund of $49.99 is approved.")
+
+def mentions_refund(completion, info, **kwargs):
+    amount = f"{info['amount']:.2f}"
+    return 1.0 if any(
+        m.role == "assistant" and m.content
+        and "refund" in m.content.lower() and amount in m.content
+        for m in completion
+    ) else 0.0
+
+scenario = Scenario(
+    id="refund_offline",
+    system="You are a support agent. Approve the refund for order A1001.",
+    # Persona is required by the type. At max_turns=1 the simulated user is
+    # never called, so this offline run makes no model call and needs no key.
+    persona=Persona(goal="Get a refund for order A1001."),
+    opening_message="My order A1001 arrived broken and I want a refund.",
+    max_turns=1,
+    info={"amount": 49.99},
+    rubric=Rubric(funcs=[mentions_refund], pass_threshold=0.5),
+)
+
+adapter = scripted_agent
+```
+
+**2. Run it:**
+
+```
+korrel run refund_offline.py
+```
+
+**Output on pass:**
+
+```
+scenario    : refund_offline
+score       : 1.0000
+status      : pass
+model calls : 1
+transcript  : .korrel/refund_offline.transcript.json
+```
+
+The CLI exits zero on pass and non-zero on failure. No provider key is set and nothing is billed: the `model calls` line counts loop invocations, and that one call is the local scripted adapter, which makes no provider request. The full conversation transcript is written to `.korrel/<scenario-id>.transcript.json`. The same file runs as a CI gate under `pytest`; see [The pytest CI gate](#the-pytest-ci-gate).
+
+## Go live
+
+Swap the scripted stand-in for a real agent and let the simulated user drive a multi-turn conversation. This run makes live model calls billed to your own provider key.
+
+Bring your own provider keys. Korrel reads keys from the environment at call time and stores none. The default provider is Claude via the `anthropic` SDK; set `ANTHROPIC_API_KEY`. The default model is `claude-sonnet-4-6` for both the agent provider and the `Persona`; override it with `AnthropicProvider(model=...)` and `Persona(..., model=...)`. OpenAI support is an optional extra (`korrel[openai]`).
+
+**1. Set a key:**
+
+```
+export ANTHROPIC_API_KEY=...
+```
+
+**2. Write a scenario with a real agent and a mock tool** (`support_refund.py`):
 
 ```python
 from korrel import MockTool, Persona, Rubric, Scenario, adapter_from_provider
@@ -68,7 +131,7 @@ scenario = Scenario(
 adapter = adapter_from_provider(AnthropicProvider())
 ```
 
-**2. Run it:**
+**3. Run it:**
 
 ```
 korrel run support_refund.py
@@ -95,8 +158,6 @@ failed      : confirmed
 clusters    : confirmed(zero)
 transcript  : .korrel/support_refund.transcript.json
 ```
-
-The CLI exits zero on pass and non-zero on failure. The full conversation transcript is written to `.korrel/<scenario-id>.transcript.json`.
 
 **CLI flags:**
 

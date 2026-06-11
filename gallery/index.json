@@ -1,0 +1,10 @@
+{
+  "comment": "Per-entry expectations for the gallery CI job (gallery/_ci_check.py). An entry not listed here defaults to {\"run\": \"pass\", \"export\": []}: it must exit 0 offline and is not export-checked. List an entry only to mark export targets or to declare a non-pass run outcome. Run values: \"pass\" (exit 0), \"tool_error\" (exit non-zero with a named tool-failure line). Export targets: \"verifiers\", \"openenv\".",
+  "entries": [
+    {"file": "support_hours.py", "run": "pass", "export": ["verifiers", "openenv"]},
+    {"file": "password_reset.py", "run": "pass", "export": []},
+    {"file": "order_triage.py", "run": "pass", "export": ["verifiers", "openenv"]},
+    {"file": "refund_denial_judge.py", "run": "pass", "export": ["verifiers", "openenv"]},
+    {"file": "tool_failure_showcase.py", "run": "tool_error", "export": []}
+  ]
+}

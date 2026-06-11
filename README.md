@@ -73,6 +73,10 @@ transcript  : .korrel/refund_offline.transcript.json
 
 The CLI exits zero on pass and non-zero on failure. No provider key is set and nothing is billed: the `model calls` line counts loop invocations, and that one call is the local scripted adapter, which makes no provider request. The `model` line reads `unknown` because a scripted adapter exposes no provider; a provider-backed adapter prints its model name. The `stop reason : max_turns` line marks that the turn budget ended the run, which at `max_turns=1` is every run; it is absent when the simulated user ends the conversation first. The full conversation transcript is written to `.korrel/<scenario-id>.transcript.json`. The same file runs as a CI gate under `pytest`; see [The pytest CI gate](#the-pytest-ci-gate).
 
+## Gallery
+
+[`gallery/`](gallery/) is a catalog of self-contained scenarios, one per agent-testing pattern: a single-turn gate, a multi-turn persona with a mock tool, a multi-tool loop, a judge-scored rubric, and a tool-failure showcase. Every entry runs offline with no key (`korrel run gallery/<entry>.py`), and the export-verified entries have been exported to verifiers and OpenEnv packages and loaded. The gallery doubles as documentation-by-example and as the first-contribution surface; see [gallery/CONTRIBUTING.md](gallery/CONTRIBUTING.md).
+
 ## Go live
 
 Swap the scripted stand-in for a real agent and let the simulated user drive a multi-turn conversation. This run makes live model calls billed to your own provider key.

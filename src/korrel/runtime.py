@@ -144,7 +144,7 @@ def _build_transcript(
     stop_reason: Optional[str] = None,
 ) -> Transcript:
     model = getattr(user_sim, "model", None)
-    params = getattr(user_sim, "params", {}) if hasattr(user_sim, "params") else {}
+    params = getattr(user_sim, "params", {})
     return Transcript(
         messages=messages,
         turns=turns,

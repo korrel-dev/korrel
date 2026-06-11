@@ -7,6 +7,7 @@ read from the environment at call time and stored nowhere.
 
 from .adapter import AgentAdapter, adapter_from_provider
 from .persona import Persona
+from .providers import MissingAPIKeyError
 from .rubric import Rubric, RewardFn, make_judge
 from .runtime import (
     FailureCluster,
@@ -33,6 +34,7 @@ __all__ = [
     "Turn",
     "FailureCluster",
     "ToolExecutionError",
+    "MissingAPIKeyError",
     "AgentAdapter",
     "adapter_from_provider",
     "Message",
@@ -41,4 +43,4 @@ __all__ = [
     "ToolSchema",
 ]
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"

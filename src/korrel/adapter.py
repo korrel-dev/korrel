@@ -40,5 +40,7 @@ def adapter_from_provider(provider: "Provider") -> AgentAdapter:
     def _adapter(messages: list[Message], tools: list[ToolSchema]) -> Message:
         return provider.complete(messages, tools=tools)
 
+    # The closure type does not declare .provider; the CLI --model path reads
+    # this dynamic attribute.
     _adapter.provider = provider  # type: ignore[attr-defined]
     return _adapter  # type: ignore[return-value]

@@ -63,13 +63,15 @@ korrel run refund_offline.py
 
 ```
 scenario    : refund_offline
+model       : unknown
 score       : 1.0000
 status      : pass
 model calls : 1
+stop reason : max_turns
 transcript  : .korrel/refund_offline.transcript.json
 ```
 
-The CLI exits zero on pass and non-zero on failure. No provider key is set and nothing is billed: the `model calls` line counts loop invocations, and that one call is the local scripted adapter, which makes no provider request. The full conversation transcript is written to `.korrel/<scenario-id>.transcript.json`. The same file runs as a CI gate under `pytest`; see [The pytest CI gate](#the-pytest-ci-gate).
+The CLI exits zero on pass and non-zero on failure. No provider key is set and nothing is billed: the `model calls` line counts loop invocations, and that one call is the local scripted adapter, which makes no provider request. The `model` line reads `unknown` because a scripted adapter exposes no provider; a provider-backed adapter prints its model name. The `stop reason : max_turns` line marks that the turn budget ended the run, which at `max_turns=1` is every run; it is absent when the simulated user ends the conversation first. The full conversation transcript is written to `.korrel/<scenario-id>.transcript.json`. The same file runs as a CI gate under `pytest`; see [The pytest CI gate](#the-pytest-ci-gate).
 
 ## Go live
 
@@ -140,9 +142,11 @@ korrel run support_refund.py
 
 ```
 scenario    : support_refund
+model       : claude-sonnet-4-6
 score       : 1.0000
 status      : pass
 model calls : 6
+stop reason : max_turns
 transcript  : .korrel/support_refund.transcript.json
 ```
 
@@ -150,9 +154,11 @@ transcript  : .korrel/support_refund.transcript.json
 
 ```
 scenario    : support_refund
+model       : claude-sonnet-4-6
 score       : 0.0000
 status      : fail
 model calls : 6
+stop reason : max_turns
 failed      : confirmed
 clusters    : confirmed(zero)
 transcript  : .korrel/support_refund.transcript.json
@@ -161,11 +167,15 @@ transcript  : .korrel/support_refund.transcript.json
 **CLI flags:**
 
 ```
-korrel run SCENARIO_PY [--out DIR] [--seed N]
+korrel run SCENARIO_PY [--out DIR] [--seed N] [--model NAME]
                        [--scenario-attr NAME] [--adapter-attr NAME]
 ```
 
-`--out` overrides the transcript directory (default `.korrel/`). `--seed` overrides the scenario seed. `--scenario-attr` and `--adapter-attr` override the module attribute names (defaults: `scenario`, `adapter`).
+`--out` overrides the transcript directory (default `.korrel/`). `--seed` overrides the scenario seed. `--model` overrides the persona model always, and the agent model when the adapter exposes a provider (as `adapter_from_provider` does); a scripted adapter reports `model : unknown`. `--scenario-attr` and `--adapter-attr` override the module attribute names (defaults: `scenario`, `adapter`).
+
+A run where any turn hits `max_tool_rounds` prints a `tool rounds : capped` line in the summary.
+
+Run failures surface as a single `error:` line on stderr with exit code 1, never a raw traceback: a missing provider key prints the instruction to set it, and a mock tool that raises prints `error: tool '<name>' raised: <message>` and still writes the partial transcript up to the failing call.
 
 ## Cost
 
@@ -223,7 +233,7 @@ result = run_scenario(scenario, adapter)
 print(result.score, result.passed, result.failed_functions)
 ```
 
-`run_scenario(persona=...)` overrides the scenario's persona for the run. The override is not limited to `Persona` instances: any object exposing `next_message(messages) -> Optional[str]` works, which is how tests inject a deterministic fake user-simulator with no model calls. The same override is accepted by `to_verifiers_env(persona=...)`, `build_environment_class(persona=...)`, and the `load_environment(persona=...)` function of an exported verifiers package.
+`run_scenario(persona=...)` overrides the scenario's persona for the run. The override is not limited to `Persona` instances: any object exposing `next_message(messages) -> Optional[str]` works, which is how tests inject a deterministic fake user-simulator with no model calls. The same override is accepted by `to_verifiers_env(persona=...)` (verifiers extra), `build_environment_class(persona=...)` (openenv extra), and the `load_environment(persona=...)` function of an exported verifiers package.
 
 `examples/support_refund.py` holds a runnable scenario definition with a real `AnthropicProvider` adapter.
 

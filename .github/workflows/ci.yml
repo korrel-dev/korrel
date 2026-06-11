@@ -80,6 +80,8 @@ jobs:
         with:
           python-version: "3.13"
 
+      # run.py performs the uv sync itself (its first step), so no explicit
+      # sync step is needed; the system Python only orchestrates subprocesses.
       - name: Run the fidelity benchmark (offline, no keys)
         working-directory: benchmarks
         run: python run.py

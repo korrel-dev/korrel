@@ -253,6 +253,17 @@ def _cmd_run(args: argparse.Namespace) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
+    # --model overrides the persona's simulator model always, and the agent
+    # model when the adapter exposes a provider (adapter_from_provider attaches
+    # it as .provider). A scripted or custom adapter without one reports the
+    # agent model as unknown.
+    provider = getattr(adapter, "provider", None)
+    if args.model:
+        scenario.persona.model = args.model
+        if provider is not None and hasattr(provider, "model"):
+            provider.model = args.model
+    agent_model = getattr(provider, "model", None) or "unknown"
+
     seed: Optional[int] = args.seed
     out_dir = Path(args.out) if args.out else Path(".korrel")
     t_start = time.monotonic()
@@ -280,9 +291,14 @@ def _cmd_run(args: argparse.Namespace) -> int:
     # 10-char pad, so the pad is widened to 12 across every line to stay aligned.
     status = "pass" if result.passed else "fail"
     print(f"{'scenario':<12}: {scenario.id}")
+    print(f"{'model':<12}: {agent_model}")
     print(f"{'score':<12}: {result.score:.4f}")
     print(f"{'status':<12}: {status}")
     print(f"{'model calls':<12}: {result.model_calls}")
+    if result.stop_reason == "max_turns":
+        print(f"{'stop reason':<12}: max_turns")
+    if result.tool_rounds_capped:
+        print(f"{'tool rounds':<12}: capped")
     if result.failed_functions:
         print(f"{'failed':<12}: {', '.join(result.failed_functions)}")
     if result.clusters:
@@ -331,6 +347,15 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         help="Override the scenario seed.",
+    )
+    run_parser.add_argument(
+        "--model",
+        metavar="NAME",
+        default=None,
+        help=(
+            "Override the persona model, and the agent model when the "
+            "adapter exposes a provider."
+        ),
     )
     run_parser.add_argument(
         "--scenario-attr",

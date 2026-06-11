@@ -30,9 +30,15 @@ def adapter_from_provider(provider: "Provider") -> AgentAdapter:
     Returns a callable that delegates to ``provider.complete(messages,
     tools=tools)``. The caller supplies their own provider and their own
     keys; Korrel holds none.
+
+    The provider is attached to the returned callable as ``.provider`` so
+    callers (the CLI ``--model`` flag, the resolved-model summary line) can
+    read or override the agent model. A custom adapter that does not expose
+    ``.provider`` reports its model as unknown.
     """
 
     def _adapter(messages: list[Message], tools: list[ToolSchema]) -> Message:
         return provider.complete(messages, tools=tools)
 
+    _adapter.provider = provider  # type: ignore[attr-defined]
     return _adapter  # type: ignore[return-value]

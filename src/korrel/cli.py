@@ -15,7 +15,8 @@ from pathlib import Path
 from typing import Optional
 
 from .adapter import AgentAdapter
-from .runtime import RunResult, Transcript, run_scenario
+from .providers import MissingAPIKeyError
+from .runtime import RunResult, ToolExecutionError, Transcript, run_scenario
 from .scenario import Scenario
 
 
@@ -253,11 +254,26 @@ def _cmd_run(args: argparse.Namespace) -> int:
         return 1
 
     seed: Optional[int] = args.seed
+    out_dir = Path(args.out) if args.out else Path(".korrel")
     t_start = time.monotonic()
-    result = run_scenario(scenario, adapter, seed=seed)
+    # No raw traceback ever escapes `korrel run`: a raising tool, a missing
+    # provider key, and any other run failure each become one clean stderr
+    # line and exit code 1. Error messages never contain a key value.
+    try:
+        result = run_scenario(scenario, adapter, seed=seed)
+    except ToolExecutionError as exc:
+        transcript_path = write_transcript(exc.transcript, scenario.id, out_dir)
+        print(f"error: tool {exc.tool_name!r} raised: {exc.original}", file=sys.stderr)
+        print(f"{'transcript':<12}: {transcript_path}", file=sys.stderr)
+        return 1
+    except MissingAPIKeyError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    except Exception as exc:
+        print(f"error: run failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 1
     duration_s = time.monotonic() - t_start
 
-    out_dir = Path(args.out) if args.out else Path(".korrel")
     transcript_path = write_transcript_for(result, scenario.id, out_dir)
 
     # Print result summary. The "model calls" label is wider than the prior

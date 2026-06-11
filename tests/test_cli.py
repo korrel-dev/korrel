@@ -501,6 +501,165 @@ def test_cli_run_transcript_path_printed(tmp_path, capsys):
     assert "transcript" in captured.out
 
 
+# ---------------------------------------------------------------------------
+# Clean error surfaces: missing key, raising tool, generic failure
+# ---------------------------------------------------------------------------
+
+
+MISSING_KEY_MODULE = """\
+from korrel import Scenario
+from korrel.persona import Persona
+from korrel.providers import MissingAPIKeyError
+
+scenario = Scenario(
+    id="missing_key_test",
+    system="test",
+    persona=Persona(goal="g", behavior="b"),
+    opening_message="hello",
+)
+
+class _KeylessAdapter:
+    def __call__(self, messages, tools):
+        raise MissingAPIKeyError(
+            "No API key found in ANTHROPIC_API_KEY. Korrel reads provider "
+            "keys from the environment at call time and stores none. Set the "
+            "variable or pass an instantiated client."
+        )
+
+adapter = _KeylessAdapter()
+"""
+
+RAISING_TOOL_MODULE = """\
+from korrel import Message, MockTool, Scenario, ToolCall, ToolFunction
+from korrel.persona import Persona
+
+def explode(args, state):
+    raise ValueError("boom from the mock tool")
+
+scenario = Scenario(
+    id="cli_tool_error_test",
+    system="test",
+    persona=Persona(goal="g", behavior="b"),
+    opening_message="hello",
+    tools=[MockTool(
+        name="exploder",
+        schema={
+            "type": "function",
+            "function": {
+                "name": "exploder",
+                "description": "Always raises.",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        },
+        respond=explode,
+    )],
+)
+
+class _Adapter:
+    def __call__(self, messages, tools):
+        return Message(
+            role="assistant",
+            tool_calls=[ToolCall(
+                id="c1",
+                function=ToolFunction(name="exploder", arguments="{}"),
+            )],
+        )
+
+adapter = _Adapter()
+"""
+
+GENERIC_FAILURE_MODULE = """\
+from korrel import Scenario
+from korrel.persona import Persona
+
+scenario = Scenario(
+    id="generic_failure_test",
+    system="test",
+    persona=Persona(goal="g", behavior="b"),
+    opening_message="hello",
+)
+
+class _BrokenAdapter:
+    def __call__(self, messages, tools):
+        raise ConnectionError("simulated transport failure")
+
+adapter = _BrokenAdapter()
+"""
+
+
+def test_cli_run_missing_key_prints_single_error_line(tmp_path, capsys):
+    f = tmp_path / "missing_key_scenario.py"
+    f.write_text(MISSING_KEY_MODULE, encoding="utf-8")
+
+    from korrel.cli import main
+    with pytest.raises(SystemExit) as exc_info:
+        main(["run", str(f), "--out", str(tmp_path / "out")])
+    assert exc_info.value.code == 1
+
+    captured = capsys.readouterr()
+    error_lines = [l for l in captured.err.splitlines() if l.startswith("error:")]
+    assert len(error_lines) == 1
+    assert "ANTHROPIC_API_KEY" in error_lines[0]
+    assert "Traceback" not in captured.err
+
+
+def test_cli_run_raising_tool_prints_error_and_writes_transcript(tmp_path, capsys):
+    f = tmp_path / "tool_error_scenario.py"
+    f.write_text(RAISING_TOOL_MODULE, encoding="utf-8")
+    out_dir = tmp_path / "out"
+
+    from korrel.cli import main
+    with pytest.raises(SystemExit) as exc_info:
+        main(["run", str(f), "--out", str(out_dir)])
+    assert exc_info.value.code == 1
+
+    captured = capsys.readouterr()
+    error_lines = [l for l in captured.err.splitlines() if l.startswith("error:")]
+    assert len(error_lines) == 1
+    assert "tool 'exploder' raised" in error_lines[0]
+    assert "boom from the mock tool" in error_lines[0]
+    assert "Traceback" not in captured.err
+
+    transcript_file = out_dir / "cli_tool_error_test.transcript.json"
+    assert transcript_file.exists()
+    data = json.loads(transcript_file.read_text(encoding="utf-8"))
+    roles = [m["role"] for m in data["messages"]]
+    assert roles == ["system", "user", "assistant"]
+
+
+def test_cli_run_generic_failure_prints_single_error_line(tmp_path, capsys):
+    f = tmp_path / "generic_failure_scenario.py"
+    f.write_text(GENERIC_FAILURE_MODULE, encoding="utf-8")
+
+    from korrel.cli import main
+    with pytest.raises(SystemExit) as exc_info:
+        main(["run", str(f), "--out", str(tmp_path / "out")])
+    assert exc_info.value.code == 1
+
+    captured = capsys.readouterr()
+    error_lines = [l for l in captured.err.splitlines() if l.startswith("error:")]
+    assert len(error_lines) == 1
+    assert "run failed: ConnectionError: simulated transport failure" in error_lines[0]
+    assert "Traceback" not in captured.err
+
+
+def test_missing_api_key_error_is_runtime_error_subclass():
+    from korrel.providers import MissingAPIKeyError
+
+    assert issubclass(MissingAPIKeyError, RuntimeError)
+
+
+def test_provider_get_client_raises_missing_api_key_error(monkeypatch):
+    from korrel.providers import AnthropicProvider, MissingAPIKeyError
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    provider = AnthropicProvider()
+    with pytest.raises(MissingAPIKeyError) as exc_info:
+        provider._get_client()
+    # The message instructs the user and never echoes a key value.
+    assert "ANTHROPIC_API_KEY" in str(exc_info.value)
+
+
 @pytest.mark.parametrize("scenario_attr,adapter_attr,expected_exit", [
     ("missing_scenario", "adapter", 1),
     ("scenario", "missing_adapter", 1),

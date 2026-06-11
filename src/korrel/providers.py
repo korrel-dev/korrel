@@ -29,6 +29,14 @@ DEFAULT_MAX_TOKENS = 1024
 DEFAULT_API_KEY_ENV = "ANTHROPIC_API_KEY"
 
 
+class MissingAPIKeyError(RuntimeError):
+    """No API key found in the environment variable the provider reads.
+
+    Subclasses ``RuntimeError`` so existing callers catching ``RuntimeError``
+    keep working. The message never contains a key value.
+    """
+
+
 @runtime_checkable
 class Provider(Protocol):
     """Something the loop and helpers can call to get a completion."""
@@ -191,7 +199,7 @@ class AnthropicProvider:
 
         key = os.environ.get(self.api_key_env)
         if not key:
-            raise RuntimeError(
+            raise MissingAPIKeyError(
                 f"No API key found in {self.api_key_env}. Korrel reads provider "
                 "keys from the environment at call time and stores none. Set the "
                 "variable or pass an instantiated client."

@@ -240,6 +240,7 @@ def test_write_openenv_env_hostile_id_templates_compile():
         env_module="my_env",
         env_name="my-env",
         scenario_attr="scenario",
+        scenario_module_name="_korrel_scenario_my_env",
     )
 
     templates = {

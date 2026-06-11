@@ -1152,6 +1152,7 @@ def test_env_module_template_hostile_id_produces_valid_python():
         scenario_id_repr=repr(hostile_id),
         scenario_id_label=_sanitize_id_for_comment(hostile_id),
         scenario_attr="scenario",
+        scenario_module_name="_korrel_scenario_my_env",
     )
 
     # Key assertion: the generated source must parse without SyntaxError.

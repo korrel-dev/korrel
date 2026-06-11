@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import re
 import shutil
 import textwrap
 from pathlib import Path
@@ -463,6 +464,7 @@ _ENV_MODULE_TEMPLATE = '''\
 from __future__ import annotations
 
 import importlib.util
+import sys
 from pathlib import Path
 
 # _SCENARIO_ID holds the exact, unmodified scenario id. repr() is used so
@@ -473,10 +475,15 @@ _SCENARIO_ID = {scenario_id_repr}
 def _load_scenario():
     """Load the scenario object from the bundled _scenario.py."""
     src = Path(__file__).parent / "_scenario.py"
-    spec = importlib.util.spec_from_file_location("_scenario", src)
+    # The in-memory module name is unique per environment so two exported
+    # packages imported in one process do not collide on a shared
+    # sys.modules entry (and the scenario module cannot shadow the
+    # environment module). The on-disk filename stays _scenario.py.
+    spec = importlib.util.spec_from_file_location({scenario_module_name!r}, src)
     if spec is None or spec.loader is None:
         raise ImportError(f"Cannot load scenario from {{src}}")
     mod = importlib.util.module_from_spec(spec)
+    sys.modules[{scenario_module_name!r}] = mod
     spec.loader.exec_module(mod)  # type: ignore[union-attr]
     scenario = getattr(mod, {scenario_attr!r}, None)
     if scenario is None:
@@ -570,6 +577,17 @@ def write_verifiers_env(
     env_id = raw_id.replace(" ", "-").replace("_", "-")
     env_module = env_id.replace("-", "_")
 
+    # Unique in-memory module name for the bundled scenario source, so two
+    # exported environments imported in one process do not collide on a
+    # shared sys.modules["_scenario"] entry. env_module is not guaranteed to
+    # be an identifier on this path (only separators are replaced above), so
+    # it is reduced to one with the same rule the openenv emitter uses (K11),
+    # and interpolated into the template via repr() so no author-controlled
+    # character reaches an executable position in the generated source.
+    scenario_module_name = "_korrel_scenario_" + re.sub(
+        r"[^0-9A-Za-z_]", "_", env_module
+    )
+
     # pyproject.toml
     pyproject_path = out_dir / "pyproject.toml"
     pyproject_path.write_text(
@@ -587,6 +605,7 @@ def write_verifiers_env(
             scenario_id_repr=repr(scenario.id),
             scenario_id_label=_sanitize_id_for_comment(scenario.id),
             scenario_attr=scenario_attr,
+            scenario_module_name=scenario_module_name,
         ),
         encoding="utf-8",
     )

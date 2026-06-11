@@ -41,8 +41,8 @@ def scripted_agent(*turns: Message):
     """Return an adapter that replays a fixed queue of assistant messages.
 
     A scripted adapter keeps the gate deterministic and offline: no provider,
-    no key. The reusable artifact is the scenario; the adapter is the local
-    stand-in for the agent under test.
+    no key. The scenario is the reusable artifact; the adapter is the local
+    stand-in for the agent under test, swapped for a real agent to go live.
     """
     queue = list(turns)
 

@@ -49,7 +49,12 @@ def _discover_entries() -> list[Path]:
 def _load_index() -> dict[str, dict[str, Any]]:
     """Map each entry file name to its expectation dict."""
     data = json.loads(INDEX_PATH.read_text(encoding="utf-8"))
-    return {row["file"]: row for row in data.get("entries", [])}
+    index: dict[str, dict[str, Any]] = {}
+    for row in data.get("entries", []):
+        if "file" not in row:
+            raise AssertionError(f"index.json: entry row is missing 'file': {row!r}")
+        index[row["file"]] = row
+    return index
 
 
 def _korrel(*args: str) -> subprocess.CompletedProcess:
@@ -107,8 +112,11 @@ def _check_run(entry: Path, expected: str) -> None:
 def _load_verifiers_env(out_dir: Path) -> None:
     """Construct the exported verifiers environment to confirm it loads."""
     env_modules = [p for p in out_dir.glob("*.py") if p.name != "_scenario.py"]
-    if not env_modules:
-        raise AssertionError(f"no verifiers env module written in {out_dir}")
+    if len(env_modules) != 1:
+        raise AssertionError(
+            f"{out_dir.name}: expected exactly one verifiers env module, "
+            f"found {[p.name for p in env_modules]}"
+        )
     module = _import_from_path(f"_gallery_vf_{out_dir.name}", env_modules[0])
     env = module.load_environment()
     if env is None:
@@ -118,24 +126,32 @@ def _load_verifiers_env(out_dir: Path) -> None:
 def _load_openenv_env(out_dir: Path) -> None:
     """Import the generated openenv package and run reset() to confirm it loads."""
     # The generated server module falls back to a top-level ``from models import``
-    # when it is not imported as a package, so the package root must be on the path.
+    # when it is not imported as a package, so the package root must be on the
+    # path and a module named ``models`` must resolve to THIS package's models.
+    # Both are scoped to this call and undone in the finally block, so the bare
+    # ``models`` name never lingers in sys.modules to shadow another package, and
+    # sys.path does not accumulate a temp-dir entry per entry.
     out_dir_str = str(out_dir)
-    if out_dir_str not in sys.path:
-        sys.path.insert(0, out_dir_str)
+    sys.path.insert(0, out_dir_str)
+    sys.modules.pop("models", None)
+    try:
+        _import_from_path("models", out_dir / "models.py")
 
-    _import_from_path("models", out_dir / "models.py")
+        env_files = list((out_dir / "server").glob("*_environment.py"))
+        if not env_files:
+            raise AssertionError(f"no openenv environment module written in {out_dir}")
+        env_module = _import_from_path(f"_gallery_oe_{out_dir.name}", env_files[0])
 
-    env_files = list((out_dir / "server").glob("*_environment.py"))
-    if not env_files:
-        raise AssertionError(f"no openenv environment module written in {out_dir}")
-    env_module = _import_from_path(f"_gallery_oe_{out_dir.name}", env_files[0])
-
-    environment = env_module.KorrelEnvironment()
-    observation = environment.reset()
-    if not getattr(observation, "messages", None):
-        raise AssertionError(
-            f"{out_dir.name}: openenv reset() returned no messages"
-        )
+        environment = env_module.KorrelEnvironment()
+        observation = environment.reset()
+        if not getattr(observation, "messages", None):
+            raise AssertionError(
+                f"{out_dir.name}: openenv reset() returned no messages"
+            )
+    finally:
+        sys.modules.pop("models", None)
+        if out_dir_str in sys.path:
+            sys.path.remove(out_dir_str)
 
 
 _LOADERS = {

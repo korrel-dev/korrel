@@ -10,10 +10,17 @@ This entry is EXPECTED to exit non-zero. The gallery CI job asserts that the
 failure is surfaced as a named tool error, not that the run passes. See
 gallery/index.json (run: tool_error) and gallery/CONTRIBUTING.md.
 
-Every single-turn entry also prints ``stop reason : max_turns`` to mark that the
-turn budget ended the run; this entry adds the tool-failure surface.
+The other single-turn entries print ``stop reason : max_turns`` on a normal run.
+This entry exits through the tool-failure path instead: its stderr carries the
+``error: tool '<name>' raised`` line and the partial-transcript path, with no
+summary line.
 
 Offline/needs-key: runs offline with no key.
+
+Live run (needs a key): replace the scripted ``adapter`` with
+``adapter_from_provider(AnthropicProvider())`` and set ANTHROPIC_API_KEY. The
+tool still raises (it models a real downstream failure), so a live run surfaces
+the same named tool error.
 
 Export: run-only entry (see gallery/index.json).
 """
@@ -93,3 +100,9 @@ adapter = scripted_agent(
         ],
     ),
 )
+
+# Go live (needs a key): swap the scripted adapter for a real agent. The tool
+# still raises, so the live run surfaces the same named tool error.
+#   from korrel import adapter_from_provider
+#   from korrel.providers import AnthropicProvider
+#   adapter = adapter_from_provider(AnthropicProvider())

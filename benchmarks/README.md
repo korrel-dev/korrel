@@ -152,6 +152,7 @@ benchmarks/
   pyproject.toml         -- uv project; Python 3.13; tau2 pinned by SHA
   .python-version        -- 3.13
   Makefile               -- make benchmark | labels | transcripts | selftest
+  run.py                 -- make-free runner: python run.py [--selftest]
   .gitignore             -- excludes .venv/
 
   transcripts/
@@ -290,19 +291,29 @@ cd benchmarks
 make benchmark
 ```
 
-`make benchmark` runs `make selftest` first (synthetic fixtures, committed),
-then recomputes `transcripts/labels.jsonl` from the frozen runs (`make labels`,
-offline and deterministic, so the recompute is a no-op diff on unchanged
-transcripts), then scores every frozen transcript in `transcripts/retail/`
-across all four legs, writes `results/results.json` and `results/summary.md`,
-and exits nonzero if any transcript fails.
+Without `make` (Windows, or any platform), the same sequence runs through the
+make-free runner; only uv and a Python on PATH are required:
 
-If frozen transcripts are not yet present, `make selftest` alone runs the
+```bash
+cd benchmarks
+python run.py
+```
+
+Both front doors run the identical steps: sync the benchmarks uv project, run
+the selftest first (synthetic fixtures, committed), recompute
+`transcripts/labels.jsonl` from the frozen runs (offline and deterministic, so
+the recompute is a no-op diff on unchanged transcripts), then score every
+frozen transcript in `transcripts/retail/` across all four legs, write
+`results/results.json` and `results/summary.md`, and exit nonzero if any
+transcript fails. The `benchmark` job in the repository CI runs `python run.py`
+on every pull request and asserts the 80/80, 0-flip result.
+
+If frozen transcripts are not yet present, the selftest alone runs the
 harness against the two committed synthetic fixtures:
 
 ```bash
 cd benchmarks
-make selftest
+make selftest          # or: python run.py --selftest
 ```
 
 ### Keyed regeneration path (founder run; requires ANTHROPIC_API_KEY)

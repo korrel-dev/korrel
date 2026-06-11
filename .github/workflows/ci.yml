@@ -64,3 +64,35 @@ jobs:
 
       - name: Run tests
         run: uv run pytest
+
+  # Reproduces the tau2 fidelity benchmark offline. Installing the benchmarks
+  # uv project git-fetches the pinned tau2; no ANTHROPIC_API_KEY is set and the
+  # benchmark itself makes no network or LLM call.
+  benchmark:
+    name: benchmark (Python 3.13)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6.0.3
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v8.2.0
+        with:
+          python-version: "3.13"
+
+      - name: Run the fidelity benchmark (offline, no keys)
+        working-directory: benchmarks
+        run: python run.py
+
+      - name: Assert the reproduced result is 80/80 with 0 verdict flips
+        working-directory: benchmarks
+        run: |
+          python - <<'EOF'
+          import json
+          data = json.load(open("results/results.json", encoding="utf-8"))
+          assert data["n_total"] == 80, f"expected 80 runs, got {data['n_total']}"
+          assert data["n_pass"] == 80, f"expected 80 passes, got {data['n_pass']}"
+          flips = sum(r["flip_count"] for r in data["runs"])
+          assert flips == 0, f"expected 0 verdict flips, got {flips}"
+          print("benchmark reproduced: 80/80, 0 verdict flips")
+          EOF
